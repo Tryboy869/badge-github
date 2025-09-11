@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype de Système de Badges pour Développeurs</title>
+    <title>Pitch: Integrated Developer Badges for GitHub</title>
     
     <style>
         /* ==========================================================================
@@ -11,17 +11,19 @@
            ========================================================================== */
         :root {
             --color-canvas-default: #0d1117;
+            --color-canvas-subtle: #161b22;
             --color-fg-default: #c9d1d9;
             --color-fg-muted: #8b949e;
             --color-border-default: #30363d;
             --color-border-muted: #21262d;
-            --color-neutral-muted: rgba(110,118,129,0.4);
+            --color-accent-fg: #58a6ff;
+            --color-success-fg: #3fb950;
             --font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
             
             /* Couleurs de rareté */
-            --rarity-common: #388bfd; /* Bleu */
-            --rarity-rare: #a371f7;   /* Violet */
-            --rarity-legendary: #d2a83c; /* Or */
+            --rarity-common: #388bfd;
+            --rarity-rare: #a371f7;
+            --rarity-legendary: #d2a83c;
 
             /* Couleurs des badges */
             --badge-js-bg: #f1e05a; --badge-js-text: #0d1117;
@@ -37,281 +39,227 @@
             background-color: var(--color-canvas-default);
             color: var(--color-fg-default);
             margin: 0;
-            padding: 20px;
-            line-height: 1.5;
+            font-size: 14px;
         }
 
         /* ==========================================================================
-           2. STRUCTURE & MISE EN PAGE PRINCIPALE
+           2. MISE EN PAGE DE L'INTERFACE GITHUB
            ========================================================================== */
-        .container {
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 20px;
+        .page-container { max-width: 1012px; margin: 24px auto; padding: 0 24px; }
+        .repo-header { margin-bottom: 24px; }
+        .repo-header h1 { font-size: 20px; font-weight: 400; color: var(--color-fg-muted); }
+        .repo-header a { color: var(--color-accent-fg); text-decoration: none; font-weight: 600; }
+        .repo-header a:hover { text-decoration: underline; }
+        
+        .pr-list-container {
+            border: 1px solid var(--color-border-default);
+            border-radius: 6px;
         }
 
-        .header {
-            padding-bottom: 16px;
+        .pr-list-header {
+            background-color: var(--color-canvas-subtle);
+            padding: 16px;
             border-bottom: 1px solid var(--color-border-default);
-            margin-bottom: 24px;
-        }
-
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            margin: 0;
-        }
-
-        .header p {
-            color: var(--color-fg-muted);
-            margin: 4px 0 0;
-        }
-
-        .user-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-
-        .user-profile {
-            display: flex;
-            align-items: center;
-            padding: 16px 0;
-            border-bottom: 1px solid var(--color-border-muted);
-        }
-
-        .user-profile:last-child {
-            border-bottom: none;
-        }
-
-        .avatar {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            background-color: var(--color-border-default);
-            margin-right: 16px;
-            flex-shrink: 0;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .username {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--color-fg-default);
-            margin-right: 4px;
+            border-radius: 6px 6px 0 0;
         }
         
+        .pr-list { list-style: none; padding: 0; margin: 0; }
+        .pr-item { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--color-border-muted); }
+        .pr-item:last-child { border-bottom: none; }
+        
+        .pr-icon { color: var(--color-success-fg); margin-top: 4px; }
+        .pr-info { flex-grow: 1; }
+        .pr-title { font-size: 16px; font-weight: 600; color: var(--color-fg-default); text-decoration: none; }
+        .pr-title:hover { color: var(--color-accent-fg); }
+
+        .pr-meta { font-size: 12px; color: var(--color-fg-muted); margin-top: 4px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+        .pr-meta .username { font-weight: 600; color: var(--color-fg-muted); }
+        .pr-meta .username:hover { color: var(--color-accent-fg); cursor: pointer; }
+        .badges-container { display: inline-flex; gap: 4px; vertical-align: middle; margin-left: 4px; }
+
         /* ==========================================================================
-           3. STYLE DES BADGES
+           3. STYLE DES BADGES & TOOLTIPS
            ========================================================================== */
         .badge {
+            position: relative; /* Pour le positionnement du tooltip */
             display: inline-block;
-            padding: 2px 8px;
-            font-size: 12px;
-            font-weight: 500;
-            line-height: 18px;
+            padding: 1px 7px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 16px;
             border-radius: 16px;
-            border: 2px solid transparent;
+            border: 1.5px solid transparent;
             text-decoration: none;
             transition: all 0.2s ease-in-out;
-            user-select: none; /* Empêcher la sélection du texte */
+            user-select: none;
         }
 
-        .badge:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        /* --- Couleurs des badges --- */
+        .badge:hover { transform: scale(1.1); }
         .badge.javascript { background-color: var(--badge-js-bg); color: var(--badge-js-text); }
         .badge.python     { background-color: var(--badge-python-bg); color: var(--badge-python-text); }
         .badge.react      { background-color: var(--badge-react-bg); color: var(--badge-react-text); }
         .badge.microsoft  { background-color: var(--badge-microsoft-bg); color: var(--badge-microsoft-text); }
         .badge.google     { background-image: var(--badge-google-gradient); color: var(--badge-google-text); }
-        .badge.github     { background-color: var(--badge-github-bg); color: var(--badge-github-text); border: 1px solid var(--color-fg-muted); }
+        .badge.github     { background-color: var(--badge-github-bg); color: var(--badge-github-text); border: 1px solid #666; }
 
-        /* --- Niveaux de rareté --- */
         .badge.common     { border-color: var(--rarity-common); }
         .badge.rare       { border-color: var(--rarity-rare); }
         .badge.legendary  { 
             border-color: var(--rarity-legendary);
-            box-shadow: 0 0 8px var(--rarity-legendary);
+            box-shadow: 0 0 5px var(--rarity-legendary);
             animation: glow 1.5s infinite alternate ease-in-out;
         }
 
         @keyframes glow {
-            from { box-shadow: 0 0 6px -2px var(--rarity-legendary); }
-            to   { box-shadow: 0 0 12px 2px var(--rarity-legendary); }
+            from { box-shadow: 0 0 4px -1px var(--rarity-legendary); }
+            to   { box-shadow: 0 0 8px 1px var(--rarity-legendary); }
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            bottom: 130%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #21262d;
+            color: var(--color-fg-default);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 10;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s, visibility 0.2s;
+            border: 1px solid var(--color-border-default);
+        }
+        .tooltip-rarity { font-weight: 600; }
+        .tooltip-date { font-size: 11px; color: var(--color-fg-muted); margin-top: 2px; }
+        
+        .badge:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
         }
         
+        .common .tooltip-rarity { color: var(--rarity-common); }
+        .rare .tooltip-rarity { color: var(--rarity-rare); }
+        .legendary .tooltip-rarity { color: var(--rarity-legendary); }
+
         /* ==========================================================================
-           4. CONTRÔLES D'INTERFACE
+           4. SECTION PITCH
            ========================================================================== */
-        .controls {
-            background-color: var(--color-border-muted);
+        .pitch-section {
+            margin-top: 40px;
+            padding: 24px;
+            background-color: var(--color-canvas-subtle);
             border: 1px solid var(--color-border-default);
             border-radius: 6px;
-            padding: 16px;
-            margin-top: 32px;
         }
-
-        .controls h3 {
-            margin-top: 0;
-            margin-bottom: 16px;
-            font-weight: 600;
-        }
-        
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-        }
-
-        .control-group-label {
-            font-weight: 600;
-            min-width: 100px;
-        }
-
-        .control-group button {
-            font-family: var(--font-family-sans-serif);
-            padding: 5px 16px;
-            font-size: 14px;
-            font-weight: 500;
-            line-height: 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            background-color: var(--color-border-default);
-            color: var(--color-fg-default);
-            border: 1px solid var(--color-border-muted);
-        }
-        
-        .control-group button:hover {
-            background-color: var(--color-neutral-muted);
-        }
-
-        /* ==========================================================================
-           5. RESPONSIVE DESIGN
-           ========================================================================== */
-        @media (max-width: 600px) {
-            body { padding: 10px; }
-            .container { padding: 10px; }
-            .user-profile { flex-direction: column; align-items: flex-start; }
-            .avatar { margin-bottom: 12px; }
-            .control-group { flex-direction: column; align-items: flex-start; gap: 8px;}
-        }
-
+        .pitch-section h2 { margin-top: 0; border-bottom: 1px solid var(--color-border-default); padding-bottom: 8px; font-size: 18px; }
+        .pitch-section p { color: var(--color-fg-muted); }
+        .pitch-section ul { padding-left: 20px; color: var(--color-fg-default); }
     </style>
 </head>
 <body>
 
-    <div class="container">
-
-        <div class="header">
-            <h1>Top Contributeurs</h1>
-            <p>Liste des développeurs avec leurs compétences et certifications validées.</p>
+    <div class="page-container">
+        <!-- En-tête de la page de simulation -->
+        <div class="repo-header">
+            <h1>
+                <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" class="octicon octicon-repo">
+                    <path fill-rule="evenodd" d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8zM5 12.25a.25.25 0 01.25-.25h3.5a.25.25 0 01.25.25v3.25a.25.25 0 01-.4.2l-1.45-1.087a.25.25 0 00-.3 0L5.4 15.7a.25.25 0 01-.4-.2v-3.25z"></path>
+                </svg>
+                <a href="#">microsoft</a> / <a href="#">vscode</a>
+            </h1>
         </div>
 
-        <ul class="user-list">
-            <li class="user-profile">
-                <div class="avatar"></div>
-                <div class="user-info">
-                    <span class="username">AliceDupont</span>
-                    <span class="badge javascript legendary" data-badge-type="javascript">JS</span>
-                    <span class="badge react rare" data-badge-type="react">React</span>
-                    <span class="badge github common" data-badge-type="github">GitHub</span>
-                </div>
-            </li>
-
-            <li class="user-profile">
-                <div class="avatar"></div>
-                <div class="user-info">
-                    <span class="username">BobMartin</span>
-                    <span class="badge python common" data-badge-type="python">Python</span>
-                    <span class="badge microsoft legendary" data-badge-type="microsoft">Microsoft</span>
-                    <span class="badge google rare" data-badge-type="google">Google</span>
-                </div>
-            </li>
-
-            <li class="user-profile">
-                <div class="avatar"></div>
-                <div class="user-info">
-                    <span class="username">CharlieCode</span>
-                    <span class="badge javascript rare" data-badge-type="javascript">JS</span>
-                    <span class="badge python rare" data-badge-type="python">Python</span>
-                    <span class="badge github legendary" data-badge-type="github">GitHub</span>
-                    <span class="badge google common" data-badge-type="google">Google</span>
-                </div>
-            </li>
-            
-            <li class="user-profile">
-                <div class="avatar"></div>
-                <div class="user-info">
-                    <span class="username">DianaBuilds</span>
-                    <span class="badge react legendary" data-badge-type="react">React</span>
-                    <span class="badge microsoft common" data-badge-type="microsoft">Microsoft</span>
-                </div>
-            </li>
-        </ul>
-
-        <div class="controls">
-            <h3>🧪 Panneau de Contrôle de Rareté</h3>
-            
-            <div class="control-group">
-                <span class="control-group-label">JavaScript</span>
-                <button onclick="changeRarity('javascript', 'common')">Commun</button>
-                <button onclick="changeRarity('javascript', 'rare')">Rare</button>
-                <button onclick="changeRarity('javascript', 'legendary')">Légendaire</button>
+        <!-- Conteneur de la liste des Pull Requests -->
+        <div class="pr-list-container">
+            <div class="pr-list-header">
+                <strong>Concept: Integrated Developer Badges</strong>
             </div>
-            
-            <div class="control-group">
-                <span class="control-group-label">Google</span>
-                <button onclick="changeRarity('google', 'common')">Commun</button>
-                <button onclick="changeRarity('google', 'rare')">Rare</button>
-                <button onclick="changeRarity('google', 'legendary')">Légendaire</button>
-            </div>
-
-            <div class="control-group">
-                <span class="control-group-label">GitHub</span>
-                <button onclick="changeRarity('github', 'common')">Commun</button>
-                <button onclick="changeRarity('github', 'rare')">Rare</button>
-                <button onclick="changeRarity('github', 'legendary')">Légendaire</button>
-            </div>
+            <ul class="pr-list">
+                <!-- PR 1 -->
+                <li class="pr-item">
+                    <div class="pr-icon">
+                        <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" class="octicon octicon-git-pull-request">
+                            <path fill-rule="evenodd" fill="currentColor" d="M14.5 3.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zm-5 0a1 1 0 102 0 1 1 0 00-2 0zM16 8.25a.75.75 0 01-.75.75H13V10a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2h2.5a.75.75 0 010 1.5H4a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h7a.5.5 0 00.5-.5V9h-2.25a.75.75 0 010-1.5H15.25a.75.75 0 01.75.75zM4.5 3.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zm-5 0a1 1 0 102 0 1 1 0 00-2 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="pr-info">
+                        <a href="#" class="pr-title">Feature: Add inline AI code suggestions</a>
+                        <div class="pr-meta">
+                            #1240 opened 2 hours ago by <strong class="username">AliceDupont</strong>
+                            <div class="badges-container">
+                                <span class="badge javascript legendary">JS
+                                    <div class="tooltip">
+                                        JavaScript Expert
+                                        <div class="tooltip-rarity legendary">Légendaire</div>
+                                        <div class="tooltip-date">Obtenu: 12/06/2024</div>
+                                    </div>
+                                </span>
+                                <span class="badge react rare">React
+                                    <div class="tooltip">
+                                        React Certified Developer
+                                        <div class="tooltip-rarity rare">Rare</div>
+                                        <div class="tooltip-date">Obtenu: 03/02/2024</div>
+                                    </div>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </li>
+                <!-- PR 2 -->
+                <li class="pr-item">
+                    <div class="pr-icon">
+                       <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" class="octicon octicon-git-pull-request">
+                            <path fill-rule="evenodd" fill="currentColor" d="M14.5 3.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zm-5 0a1 1 0 102 0 1 1 0 00-2 0zM16 8.25a.75.75 0 01-.75.75H13V10a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2h2.5a.75.75 0 010 1.5H4a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h7a.5.5 0 00.5-.5V9h-2.25a.75.75 0 010-1.5H15.25a.75.75 0 01.75.75zM4.5 3.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zm-5 0a1 1 0 102 0 1 1 0 00-2 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="pr-info">
+                        <a href="#" class="pr-title">Fix: Performance regression in dependency resolver</a>
+                        <div class="pr-meta">
+                            #1239 opened 5 hours ago by <strong class="username">BobMartin</strong>
+                             <div class="badges-container">
+                                <span class="badge python rare">Python
+                                    <div class="tooltip">
+                                        Python Core Contributor
+                                        <div class="tooltip-rarity rare">Rare</div>
+                                        <div class="tooltip-date">Obtenu: 09/11/2023</div>
+                                    </div>
+                                </span>
+                                <span class="badge google common">Google
+                                     <div class="tooltip">
+                                        Google Cloud Certified
+                                        <div class="tooltip-rarity common">Commun</div>
+                                        <div class="tooltip-date">Obtenu: 25/07/2024</div>
+                                    </div>
+                                </span>
+                                <span class="badge github legendary">GitHub
+                                     <div class="tooltip">
+                                        GitHub Star
+                                        <div class="tooltip-rarity legendary">Légendaire</div>
+                                        <div class="tooltip-date">Obtenu: 01/01/2023</div>
+                                    </div>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </li>
+            </ul>
         </div>
 
+        <!-- Section expliquant le pitch -->
+        <div class="pitch-section">
+            <h2>Proposition de Valeur</h2>
+            <p>Ce prototype démontre comment un système de badges de compétences peut s'intégrer de manière transparente dans l'interface de GitHub pour enrichir l'écosystème.</p>
+            <ul>
+                <li><strong>Validation instantanée :</strong> Reconnaître immédiatement l'expertise d'un contributeur.</li>
+                <li><strong>Gamification et engagement :</strong> Motiver les développeurs à obtenir des certifications et à contribuer à des projets pour gagner de nouveaux badges.</li>
+                <li><strong>Aide au recrutement :</strong> Permettre aux recruteurs d'identifier plus facilement les talents qualifiés directement sur la plateforme.</li>
+                <li><strong>Écosystème unifié :</strong> Créer des ponts entre les certifications (Microsoft, Google) et les contributions open-source (GitHub), renforçant la valeur de chaque plateforme.</li>
+            </ul>
+        </div>
     </div>
-
-    <script>
-        /**
-         * Fonction pour changer dynamiquement le niveau de rareté d'un type de badge.
-         * @param {string} badgeType - Le type du badge à modifier (ex: 'javascript').
-         * @param {string} newRarity - La nouvelle rareté à appliquer (ex: 'common', 'rare', 'legendary').
-         */
-        function changeRarity(badgeType, newRarity) {
-            // 1. Sélectionner tous les badges du type spécifié.
-            const badgesToUpdate = document.querySelectorAll(`.badge[data-badge-type="${badgeType}"]`);
-            
-            // 2. Définir les classes de rareté possibles.
-            const rarityLevels = ['common', 'rare', 'legendary'];
-
-            // 3. Itérer sur chaque badge trouvé.
-            badgesToUpdate.forEach(badge => {
-                // 3a. Retirer toutes les anciennes classes de rareté.
-                badge.classList.remove(...rarityLevels);
-                
-                // 3b. Ajouter la nouvelle classe de rareté.
-                badge.classList.add(newRarity);
-            });
-        }
-    </script>
-
 </body>
 </html>
