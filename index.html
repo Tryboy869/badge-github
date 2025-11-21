@@ -2,128 +2,133 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>LDSS Database Node</title>
+  <title>LDSS Database Node v2</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:system-ui;background:#0a0a0f;color:#e0e0e0;padding:1.5rem;min-height:100vh}
-    h1{font-size:1.5rem;color:#00d4ff;margin-bottom:.5rem}
+    body{font-family:system-ui;background:#0a0a0f;color:#e0e0e0;padding:1rem;min-height:100vh}
+    h1{font-size:1.3rem;color:#00d4ff;margin-bottom:.5rem}
     .status{display:flex;align-items:center;gap:.5rem;margin-bottom:1rem}
-    .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
-    @keyframes pulse{50%{opacity:.5}}
+    .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e}
     .card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:1rem;margin-bottom:1rem}
-    .endpoint{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);border-radius:6px;padding:.75rem;font-family:monospace;font-size:.85rem;margin:.5rem 0}
-    #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:1rem;font-family:monospace;min-height:100px;white-space:pre-wrap;word-break:break-all}
-    #output::before{content:"📤 SCRAPE THIS";display:block;color:#7b2cbf;font-size:.7rem;margin-bottom:.5rem}
-    .log{font-size:.8rem;max-height:150px;overflow-y:auto;margin-top:1rem}
-    .log-entry{padding:.2rem 0;border-bottom:1px solid rgba(255,255,255,.05)}
-    .t{color:#666}.a{color:#00d4ff}.s{color:#22c55e}.e{color:#ef4444}
-    button{background:linear-gradient(90deg,#7b2cbf,#00d4ff);border:none;padding:.5rem 1rem;border-radius:6px;color:#fff;cursor:pointer;margin:.25rem}
-    input{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:.4rem;color:#fff;width:200px;margin:.25rem}
+    #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:1rem;font-family:monospace;min-height:60px;white-space:pre-wrap;word-break:break-all;font-size:.85rem}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;text-align:center}
+    .stat{background:rgba(0,212,255,.1);padding:.5rem;border-radius:4px}
+    .stat-val{font-size:1.5rem;font-weight:bold;color:#00d4ff}
+    .stat-label{font-size:.7rem;color:#888}
   </style>
 </head>
 <body>
-  <h1>🗄️ LDSS Database Node</h1>
-  <div class="status"><div class="dot" id="dot"></div><span id="status">Initialisation...</span></div>
+  <h1>🗄️ LDSS Database Node v2</h1>
+  <div class="status"><div class="dot"></div><span id="status">Ready</span></div>
   
-  <div class="card">
-    <strong>Node ID:</strong> <span id="nodeId">-</span><br>
-    <strong>Collections:</strong> <span id="cols">0</span> | <strong>Records:</strong> <span id="recs">0</span>
+  <div class="stats">
+    <div class="stat"><div class="stat-val" id="s-cols">0</div><div class="stat-label">Collections</div></div>
+    <div class="stat"><div class="stat-val" id="s-recs">0</div><div class="stat-label">Records</div></div>
+    <div class="stat"><div class="stat-val" id="s-ops">0</div><div class="stat-label">Operations</div></div>
   </div>
   
-  <div class="card">
-    <strong>📡 API Endpoints (via URL):</strong>
-    <div class="endpoint">?action=write&collection=users&data={"name":"John"}</div>
-    <div class="endpoint">?action=read&collection=users</div>
-    <div class="endpoint">?action=list</div>
-    <div class="endpoint">?action=delete&collection=users&id=1</div>
-    <div class="endpoint">?action=clear</div>
-  </div>
-  
-  <div class="card">
-    <strong>🔧 Test Manuel:</strong><br>
-    <input id="col" placeholder="collection"><input id="data" placeholder='{"key":"value"}'>
-    <button onclick="doWrite()">Write</button><button onclick="doRead()">Read</button><button onclick="doList()">List</button>
-  </div>
-  
-  <div id="output">{"status":"loading"}</div>
-  
-  <!-- HIDDEN: Pour scraping facile -->
-  <script type="application/json" id="ldss-result"></script>
-  
-  <div class="log" id="log"></div>
+  <div id="output">{"status":"ready"}</div>
 
 <script>
-// ═══════════════════════════════════════════
-// LDSS MINI - Storage Engine
-// ═══════════════════════════════════════════
-const DB_NAME = 'LDSS_Node';
-const DB_VERSION = 1;
+// ═══════════════════════════════════════════════════════════════
+// LDSS STORAGE ENGINE v2 - Optimisé pour le scale
+// ═══════════════════════════════════════════════════════════════
+const DB = 'LDSS_v2';
 let db = null;
-const nodeId = 'node_' + Math.random().toString(36).substr(2, 8);
+let opCount = 0;
 
-// Init IndexedDB
 async function initDB() {
   return new Promise((res, rej) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(DB, 1);
     req.onerror = () => rej(req.error);
     req.onsuccess = () => { db = req.result; res(); };
     req.onupgradeneeded = e => {
       const d = e.target.result;
-      if (!d.objectStoreNames.contains('store')) {
-        d.createObjectStore('store', { keyPath: 'id', autoIncrement: true });
+      if (!d.objectStoreNames.contains('data')) {
+        const store = d.createObjectStore('data', { keyPath: 'id', autoIncrement: true });
+        store.createIndex('collection', 'collection', { unique: false });
       }
     };
   });
 }
 
-// WRITE
-async function write(collection, data) {
+// WRITE SINGLE
+async function write(col, data) {
   return new Promise((res, rej) => {
-    const tx = db.transaction(['store'], 'readwrite');
-    const s = tx.objectStore('store');
-    const record = { collection, data, ts: Date.now(), node: nodeId };
-    const req = s.add(record);
-    req.onsuccess = () => res({ ok: true, id: req.result, record });
+    const tx = db.transaction(['data'], 'readwrite');
+    const req = tx.objectStore('data').add({ collection: col, data, ts: Date.now() });
+    req.onsuccess = () => { opCount++; res({ ok: true, id: req.result }); };
     req.onerror = () => rej(req.error);
   });
 }
 
-// READ
-async function read(collection) {
+// WRITE BATCH (optimisé)
+async function writeBatch(col, items) {
   return new Promise((res, rej) => {
-    const tx = db.transaction(['store'], 'readonly');
-    const req = tx.objectStore('store').getAll();
+    const tx = db.transaction(['data'], 'readwrite');
+    const store = tx.objectStore('data');
+    let count = 0;
+    
+    for (const item of items) {
+      const req = store.add({ collection: col, data: item, ts: Date.now() });
+      req.onsuccess = () => count++;
+    }
+    
+    tx.oncomplete = () => { opCount += items.length; res({ ok: true, count }); };
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+// READ
+async function read(col) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(['data'], 'readonly');
+    const store = tx.objectStore('data');
+    const idx = store.index('collection');
+    const req = idx.getAll(col);
     req.onsuccess = () => {
-      const filtered = req.result.filter(r => r.collection === collection);
-      res({ ok: true, collection, count: filtered.length, data: filtered });
+      opCount++;
+      res({ ok: true, collection: col, count: req.result.length, data: req.result });
     };
     req.onerror = () => rej(req.error);
   });
 }
 
-// LIST ALL
+// COUNT (rapide)
+async function count(col) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(['data'], 'readonly');
+    const idx = tx.objectStore('data').index('collection');
+    const req = idx.count(col);
+    req.onsuccess = () => { opCount++; res({ ok: true, collection: col, count: req.result }); };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+// LIST
 async function list() {
   return new Promise((res, rej) => {
-    const tx = db.transaction(['store'], 'readonly');
-    const req = tx.objectStore('store').getAll();
+    const tx = db.transaction(['data'], 'readonly');
+    const req = tx.objectStore('data').getAll();
     req.onsuccess = () => {
       const cols = {};
       req.result.forEach(r => {
-        if (!cols[r.collection]) cols[r.collection] = [];
-        cols[r.collection].push(r);
+        if (!cols[r.collection]) cols[r.collection] = 0;
+        cols[r.collection]++;
       });
-      res({ ok: true, collections: Object.keys(cols), data: cols, total: req.result.length });
+      opCount++;
+      res({ ok: true, collections: Object.keys(cols), counts: cols, total: req.result.length });
     };
     req.onerror = () => rej(req.error);
   });
 }
 
 // DELETE
-async function del(collection, id) {
+async function del(col, id) {
   return new Promise((res, rej) => {
-    const tx = db.transaction(['store'], 'readwrite');
-    const req = tx.objectStore('store').delete(Number(id));
-    req.onsuccess = () => res({ ok: true, deleted: id });
+    const tx = db.transaction(['data'], 'readwrite');
+    const req = tx.objectStore('data').delete(Number(id));
+    req.onsuccess = () => { opCount++; res({ ok: true, deleted: id }); };
     req.onerror = () => rej(req.error);
   });
 }
@@ -131,143 +136,78 @@ async function del(collection, id) {
 // CLEAR
 async function clear() {
   return new Promise((res, rej) => {
-    const tx = db.transaction(['store'], 'readwrite');
-    const req = tx.objectStore('store').clear();
-    req.onsuccess = () => res({ ok: true, msg: 'All cleared' });
+    const tx = db.transaction(['data'], 'readwrite');
+    const req = tx.objectStore('data').clear();
+    req.onsuccess = () => { opCount++; res({ ok: true, msg: 'cleared' }); };
     req.onerror = () => rej(req.error);
   });
 }
 
-// ═══════════════════════════════════════════
-// OUTPUT & LOGGING
-// ═══════════════════════════════════════════
-function output(data) {
-  const json = JSON.stringify(data, null, 2);
+// OUTPUT
+function out(data) {
+  const json = JSON.stringify(data);
   document.getElementById('output').textContent = json;
-  document.getElementById('ldss-result').textContent = json;
   updateStats();
-}
-
-function log(action, msg, isError = false) {
-  const logEl = document.getElementById('log');
-  const time = new Date().toLocaleTimeString();
-  logEl.innerHTML = `<div class="log-entry"><span class="t">${time}</span> <span class="a">[${action}]</span> <span class="${isError?'e':'s'}">${msg}</span></div>` + logEl.innerHTML;
 }
 
 async function updateStats() {
   try {
     const l = await list();
-    document.getElementById('cols').textContent = l.collections.length;
-    document.getElementById('recs').textContent = l.total;
+    document.getElementById('s-cols').textContent = l.collections.length;
+    document.getElementById('s-recs').textContent = l.total;
+    document.getElementById('s-ops').textContent = opCount;
   } catch(e) {}
 }
 
-// ═══════════════════════════════════════════
-// URL PARSER - Process incoming commands
-// ═══════════════════════════════════════════
-async function processURL() {
-  const params = new URLSearchParams(window.location.search);
-  const action = params.get('action');
-  const collection = params.get('collection');
-  const dataStr = params.get('data');
-  const id = params.get('id');
+// URL ROUTER
+async function route() {
+  const p = new URLSearchParams(location.search);
+  const action = p.get('action');
+  const col = p.get('collection');
+  const dataStr = p.get('data');
+  const id = p.get('id');
   
-  if (!action) {
-    output({ status: 'ready', nodeId, msg: 'Waiting for commands...', endpoints: ['write','read','list','delete','clear'] });
-    return;
-  }
+  if (!action) { out({ status: 'ready', actions: ['write','write_batch','read','count','list','delete','clear'] }); return; }
   
   try {
-    let result;
+    let r;
     switch(action) {
       case 'write':
-        if (!collection || !dataStr) throw new Error('Need collection & data');
-        const data = JSON.parse(decodeURIComponent(dataStr));
-        result = await write(collection, data);
-        log('WRITE', `${collection} → ID ${result.id}`);
+        r = await write(col, JSON.parse(decodeURIComponent(dataStr)));
         break;
-        
+      case 'write_batch':
+        const batch = JSON.parse(decodeURIComponent(dataStr));
+        r = await writeBatch(col, batch.batch || batch);
+        break;
       case 'read':
-        if (!collection) throw new Error('Need collection');
-        result = await read(collection);
-        log('READ', `${collection} → ${result.count} records`);
+        r = await read(col);
         break;
-        
+      case 'count':
+        r = await count(col);
+        break;
       case 'list':
-        result = await list();
-        log('LIST', `${result.collections.length} collections, ${result.total} total`);
+        r = await list();
         break;
-        
       case 'delete':
-        if (!collection || !id) throw new Error('Need collection & id');
-        result = await del(collection, id);
-        log('DELETE', `Removed ID ${id}`);
+        r = await del(col, id);
         break;
-        
       case 'clear':
-        result = await clear();
-        log('CLEAR', 'All data wiped');
+        r = await clear();
         break;
-        
       default:
-        throw new Error('Unknown action: ' + action);
+        r = { ok: false, error: 'unknown action' };
     }
-    output(result);
+    out(r);
   } catch(e) {
-    output({ ok: false, error: e.message });
-    log('ERROR', e.message, true);
+    out({ ok: false, error: e.message });
   }
 }
 
-// Manual test buttons
-async function doWrite() {
-  const col = document.getElementById('col').value || 'test';
-  const dataStr = document.getElementById('data').value || '{}';
-  try {
-    const result = await write(col, JSON.parse(dataStr));
-    output(result);
-    log('WRITE', `${col} → ID ${result.id}`);
-  } catch(e) { output({ ok: false, error: e.message }); }
-}
-async function doRead() {
-  const col = document.getElementById('col').value || 'test';
-  const result = await read(col);
-  output(result);
-  log('READ', `${col} → ${result.count} records`);
-}
-async function doList() {
-  const result = await list();
-  output(result);
-  log('LIST', `${result.total} total records`);
-}
-
-// ═══════════════════════════════════════════
 // INIT
-// ═══════════════════════════════════════════
 (async () => {
-  try {
-    await initDB();
-    document.getElementById('status').textContent = 'Online - Ready';
-    document.getElementById('nodeId').textContent = nodeId;
-    log('INIT', 'LDSS Node started');
-    await processURL();
-    
-    // Re-process on URL change (for SPA-like behavior)
-    window.addEventListener('hashchange', processURL);
-    
-    // Poll for URL changes (backup)
-    let lastSearch = window.location.search;
-    setInterval(() => {
-      if (window.location.search !== lastSearch) {
-        lastSearch = window.location.search;
-        processURL();
-      }
-    }, 500);
-    
-  } catch(e) {
-    document.getElementById('status').textContent = 'Error: ' + e.message;
-    document.getElementById('dot').style.background = '#ef4444';
-  }
+  await initDB();
+  document.getElementById('status').textContent = 'Online';
+  await route();
 })();
 </script>
 </body>
