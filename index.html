@@ -2,44 +2,62 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>LDSS Database Node v2</title>
+  <title>LDSS Node v3 - Dual Mode</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:system-ui;background:#0a0a0f;color:#e0e0e0;padding:1rem;min-height:100vh}
-    h1{font-size:1.3rem;color:#00d4ff;margin-bottom:.5rem}
-    .status{display:flex;align-items:center;gap:.5rem;margin-bottom:1rem}
-    .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e}
-    .card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:1rem;margin-bottom:1rem}
-    #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:1rem;font-family:monospace;min-height:60px;white-space:pre-wrap;word-break:break-all;font-size:.85rem}
-    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;text-align:center}
-    .stat{background:rgba(0,212,255,.1);padding:.5rem;border-radius:4px}
-    .stat-val{font-size:1.5rem;font-weight:bold;color:#00d4ff}
-    .stat-label{font-size:.7rem;color:#888}
+    body{font-family:system-ui;background:#0a0a0f;color:#e0e0e0;padding:1rem}
+    h1{font-size:1.2rem;color:#00d4ff;margin-bottom:.5rem}
+    .mode{display:inline-block;padding:.2rem .5rem;border-radius:4px;font-size:.7rem;margin-left:.5rem}
+    .mode-a{background:#7b2cbf}
+    .mode-b{background:#059669}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin:1rem 0}
+    .stat{background:rgba(255,255,255,.05);padding:.5rem;border-radius:4px;text-align:center}
+    .stat-val{font-size:1.3rem;font-weight:bold;color:#00d4ff}
+    .stat-label{font-size:.65rem;color:#888}
+    #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:.75rem;font-family:monospace;font-size:.8rem;min-height:50px;white-space:pre-wrap;word-break:break-all}
+    #log{margin-top:1rem;font-size:.7rem;max-height:150px;overflow-y:auto;background:rgba(0,0,0,.5);padding:.5rem;border-radius:4px}
+    .log-entry{padding:.1rem 0;border-bottom:1px solid rgba(255,255,255,.05)}
   </style>
 </head>
 <body>
-  <h1>🗄️ LDSS Database Node v2</h1>
-  <div class="status"><div class="dot"></div><span id="status">Ready</span></div>
+  <h1>🗄️ LDSS Node v3 
+    <span class="mode mode-a">A: Direct</span>
+    <span class="mode mode-b">B: Fetch Queue</span>
+  </h1>
   
   <div class="stats">
+    <div class="stat"><div class="stat-val" id="s-total">0</div><div class="stat-label">Total Records</div></div>
     <div class="stat"><div class="stat-val" id="s-cols">0</div><div class="stat-label">Collections</div></div>
-    <div class="stat"><div class="stat-val" id="s-recs">0</div><div class="stat-label">Records</div></div>
+    <div class="stat"><div class="stat-val" id="s-queue">0</div><div class="stat-label">Queue (B)</div></div>
     <div class="stat"><div class="stat-val" id="s-ops">0</div><div class="stat-label">Operations</div></div>
   </div>
   
-  <div id="output">{"status":"ready"}</div>
+  <div id="output">{"status":"loading..."}</div>
+  <div id="log"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-// LDSS STORAGE ENGINE v2 - Optimisé pour le scale
+// LDSS NODE v3 - DUAL MODE
+// Mode A: Direct via URL params (Playwright write + read)
+// Mode B: Fetch queue (HTTP write, Playwright read)
 // ═══════════════════════════════════════════════════════════════
-const DB = 'LDSS_v2';
+
+const DB_NAME = 'LDSS_v3';
 let db = null;
 let opCount = 0;
 
+// ─────────────────────────────────────────
+// CONFIG MODE B - Queue endpoint
+// ─────────────────────────────────────────
+const QUEUE_URL = localStorage.getItem('LDSS_QUEUE_URL') || '';
+let queuePollInterval = null;
+
+// ─────────────────────────────────────────
+// DATABASE
+// ─────────────────────────────────────────
 async function initDB() {
   return new Promise((res, rej) => {
-    const req = indexedDB.open(DB, 1);
+    const req = indexedDB.open(DB_NAME, 1);
     req.onerror = () => rej(req.error);
     req.onsuccess = () => { db = req.result; res(); };
     req.onupgradeneeded = e => {
@@ -52,7 +70,6 @@ async function initDB() {
   });
 }
 
-// WRITE SINGLE
 async function write(col, data) {
   return new Promise((res, rej) => {
     const tx = db.transaction(['data'], 'readwrite');
@@ -62,60 +79,45 @@ async function write(col, data) {
   });
 }
 
-// WRITE BATCH (optimisé)
 async function writeBatch(col, items) {
   return new Promise((res, rej) => {
     const tx = db.transaction(['data'], 'readwrite');
     const store = tx.objectStore('data');
     let count = 0;
-    
-    for (const item of items) {
-      const req = store.add({ collection: col, data: item, ts: Date.now() });
-      req.onsuccess = () => count++;
-    }
-    
-    tx.oncomplete = () => { opCount += items.length; res({ ok: true, count }); };
+    items.forEach(item => {
+      store.add({ collection: col, data: item, ts: Date.now() });
+      count++;
+    });
+    tx.oncomplete = () => { opCount += count; res({ ok: true, count }); };
     tx.onerror = () => rej(tx.error);
   });
 }
 
-// READ
 async function read(col) {
   return new Promise((res, rej) => {
     const tx = db.transaction(['data'], 'readonly');
-    const store = tx.objectStore('data');
-    const idx = store.index('collection');
-    const req = idx.getAll(col);
-    req.onsuccess = () => {
-      opCount++;
-      res({ ok: true, collection: col, count: req.result.length, data: req.result });
-    };
+    const req = tx.objectStore('data').index('collection').getAll(col);
+    req.onsuccess = () => { opCount++; res({ ok: true, collection: col, count: req.result.length, data: req.result }); };
     req.onerror = () => rej(req.error);
   });
 }
 
-// COUNT (rapide)
 async function count(col) {
   return new Promise((res, rej) => {
     const tx = db.transaction(['data'], 'readonly');
-    const idx = tx.objectStore('data').index('collection');
-    const req = idx.count(col);
-    req.onsuccess = () => { opCount++; res({ ok: true, collection: col, count: req.result }); };
+    const req = tx.objectStore('data').index('collection').count(col);
+    req.onsuccess = () => { opCount++; res({ ok: true, count: req.result }); };
     req.onerror = () => rej(req.error);
   });
 }
 
-// LIST
 async function list() {
   return new Promise((res, rej) => {
     const tx = db.transaction(['data'], 'readonly');
     const req = tx.objectStore('data').getAll();
     req.onsuccess = () => {
       const cols = {};
-      req.result.forEach(r => {
-        if (!cols[r.collection]) cols[r.collection] = 0;
-        cols[r.collection]++;
-      });
+      req.result.forEach(r => { cols[r.collection] = (cols[r.collection] || 0) + 1; });
       opCount++;
       res({ ok: true, collections: Object.keys(cols), counts: cols, total: req.result.length });
     };
@@ -123,61 +125,108 @@ async function list() {
   });
 }
 
-// DELETE
-async function del(col, id) {
-  return new Promise((res, rej) => {
-    const tx = db.transaction(['data'], 'readwrite');
-    const req = tx.objectStore('data').delete(Number(id));
-    req.onsuccess = () => { opCount++; res({ ok: true, deleted: id }); };
-    req.onerror = () => rej(req.error);
-  });
-}
-
-// CLEAR
 async function clear() {
   return new Promise((res, rej) => {
     const tx = db.transaction(['data'], 'readwrite');
     const req = tx.objectStore('data').clear();
-    req.onsuccess = () => { opCount++; res({ ok: true, msg: 'cleared' }); };
+    req.onsuccess = () => { opCount++; res({ ok: true }); };
     req.onerror = () => rej(req.error);
   });
 }
 
-// OUTPUT
+// ─────────────────────────────────────────
+// MODE B: QUEUE POLLING
+// ─────────────────────────────────────────
+async function pollQueue() {
+  if (!QUEUE_URL) return;
+  
+  try {
+    const res = await fetch(QUEUE_URL + '?t=' + Date.now());
+    const data = await res.json();
+    
+    if (data && data.commands && data.commands.length > 0) {
+      log(`Queue: ${data.commands.length} commandes`);
+      
+      for (const cmd of data.commands) {
+        if (cmd.action === 'write' && cmd.collection && cmd.data) {
+          await write(cmd.collection, cmd.data);
+        } else if (cmd.action === 'write_batch' && cmd.collection && cmd.items) {
+          await writeBatch(cmd.collection, cmd.items);
+        }
+      }
+      
+      // Clear queue après traitement
+      await fetch(QUEUE_URL, { method: 'DELETE' });
+      updateStats();
+    }
+  } catch(e) {
+    // Silently fail if queue not available
+  }
+}
+
+function startQueuePolling(interval = 500) {
+  if (queuePollInterval) clearInterval(queuePollInterval);
+  queuePollInterval = setInterval(pollQueue, interval);
+  log('Queue polling started');
+}
+
+// ─────────────────────────────────────────
+// OUTPUT & LOGGING
+// ─────────────────────────────────────────
 function out(data) {
-  const json = JSON.stringify(data);
-  document.getElementById('output').textContent = json;
+  document.getElementById('output').textContent = JSON.stringify(data);
   updateStats();
 }
 
 async function updateStats() {
   try {
     const l = await list();
+    document.getElementById('s-total').textContent = l.total;
     document.getElementById('s-cols').textContent = l.collections.length;
-    document.getElementById('s-recs').textContent = l.total;
     document.getElementById('s-ops').textContent = opCount;
   } catch(e) {}
 }
 
-// URL ROUTER
+function log(msg) {
+  const el = document.getElementById('log');
+  const time = new Date().toLocaleTimeString();
+  el.innerHTML = `<div class="log-entry">${time} - ${msg}</div>` + el.innerHTML;
+}
+
+// ─────────────────────────────────────────
+// URL ROUTER (MODE A)
+// ─────────────────────────────────────────
 async function route() {
   const p = new URLSearchParams(location.search);
   const action = p.get('action');
   const col = p.get('collection');
   const dataStr = p.get('data');
   const id = p.get('id');
+  const queueUrl = p.get('queue_url');
   
-  if (!action) { out({ status: 'ready', actions: ['write','write_batch','read','count','list','delete','clear'] }); return; }
+  // Set queue URL if provided
+  if (queueUrl) {
+    localStorage.setItem('LDSS_QUEUE_URL', queueUrl);
+    location.reload();
+    return;
+  }
+  
+  if (!action) {
+    out({ status: 'ready', mode: 'dual', actions: ['write','write_batch','read','count','list','clear','set_queue'] });
+    return;
+  }
   
   try {
     let r;
     switch(action) {
       case 'write':
         r = await write(col, JSON.parse(decodeURIComponent(dataStr)));
+        log(`Write: ${col}`);
         break;
       case 'write_batch':
         const batch = JSON.parse(decodeURIComponent(dataStr));
         r = await writeBatch(col, batch.batch || batch);
+        log(`Batch: ${col} x${r.count}`);
         break;
       case 'read':
         r = await read(col);
@@ -188,14 +237,16 @@ async function route() {
       case 'list':
         r = await list();
         break;
-      case 'delete':
-        r = await del(col, id);
-        break;
       case 'clear':
         r = await clear();
+        log('Cleared');
+        break;
+      case 'start_queue':
+        startQueuePolling(parseInt(p.get('interval')) || 500);
+        r = { ok: true, msg: 'Queue polling started' };
         break;
       default:
-        r = { ok: false, error: 'unknown action' };
+        r = { ok: false, error: 'unknown' };
     }
     out(r);
   } catch(e) {
@@ -203,11 +254,19 @@ async function route() {
   }
 }
 
+// ─────────────────────────────────────────
 // INIT
+// ─────────────────────────────────────────
 (async () => {
   await initDB();
-  document.getElementById('status').textContent = 'Online';
+  log('DB initialized');
   await route();
+  
+  // Auto-start queue polling if URL is set
+  if (QUEUE_URL) {
+    startQueuePolling();
+    document.getElementById('s-queue').textContent = '●';
+  }
 })();
 </script>
 </body>
