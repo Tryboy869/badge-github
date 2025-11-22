@@ -3,14 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LDSS Node v4.1 - Image Support</title>
+  <title>LDSS v4.2 - Persistence Test</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui;background:#0a0a12;color:#e0e0e0;padding:1rem;min-height:100vh}
     h1{font-size:1.3rem;background:linear-gradient(90deg,#00d4ff,#7b2cbf);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
+    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:1rem}
     .status{display:flex;align-items:center;gap:.5rem}
-    .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e}
+    .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .badge{background:#7b2cbf;color:#fff;padding:.3rem .7rem;border-radius:6px;font-size:.75rem;font-weight:bold}
     .workers{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-bottom:1rem}
     .worker{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:.5rem;font-size:.75rem}
     .worker-name{color:#00d4ff;font-weight:600}
@@ -19,17 +21,38 @@
     .stat{background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.2);border-radius:6px;padding:.5rem;text-align:center}
     .stat-val{font-size:1.5rem;font-weight:bold;color:#00d4ff}
     .stat-label{font-size:.65rem;color:#888}
+    .persistence-test{background:rgba(34,197,94,.1);border:2px solid #22c55e;border-radius:8px;padding:1rem;margin-bottom:1rem}
+    .persistence-test.fail{background:rgba(239,68,68,.1);border-color:#ef4444}
+    .persistence-test h3{margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
+    .test-result{font-family:monospace;font-size:.8rem;margin:.5rem 0;padding:.5rem;background:#000;border-radius:4px}
     #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:.75rem;font-family:monospace;font-size:.75rem;min-height:80px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-    .badge{display:inline-block;background:#22c55e;color:#000;padding:.2rem .5rem;border-radius:4px;font-size:.7rem;font-weight:bold;margin-left:.5rem}
+    .info-box{background:rgba(234,179,8,.1);border:1px solid #eab308;border-radius:8px;padding:1rem;margin-bottom:1rem;font-size:.85rem}
   </style>
 </head>
 <body>
   <div class="header">
     <div>
-      <h1>🗄️ LDSS Node v4.1</h1>
-      <span class="badge">IMAGE SUPPORT</span>
+      <h1>🗄️ LDSS v4.2</h1>
+      <span class="badge">PERSISTENCE TEST</span>
     </div>
-    <div class="status"><div class="dot" id="dot"></div><span id="status">Init...</span></div>
+    <div class="status">
+      <div class="dot" id="dot"></div>
+      <span id="status">Init...</span>
+      <span id="uptime" style="color:#888;font-size:.8rem;margin-left:1rem">0s</span>
+    </div>
+  </div>
+
+  <div class="info-box" id="infoBox">
+    🧪 <strong>Test de persistance automatique au démarrage...</strong>
+  </div>
+
+  <div class="persistence-test" id="persistenceTest">
+    <h3>
+      <span id="persistIcon">🔄</span>
+      <span>Test de Persistance IndexedDB</span>
+    </h3>
+    <div class="test-result" id="testResult">Analyse en cours...</div>
+    <div class="test-result" id="testDetail" style="display:none"></div>
   </div>
 
   <div class="workers" id="workers"></div>
@@ -38,15 +61,14 @@
     <div class="stat"><div class="stat-val" id="s-total">0</div><div class="stat-label">Total Records</div></div>
     <div class="stat"><div class="stat-val" id="s-size">0</div><div class="stat-label">Size (KB)</div></div>
     <div class="stat"><div class="stat-val" id="s-ops">0</div><div class="stat-label">Operations</div></div>
-    <div class="stat"><div class="stat-val" id="s-uptime">0s</div><div class="stat-label">Uptime</div></div>
+    <div class="stat"><div class="stat-val" id="s-sessions">0</div><div class="stat-label">Sessions</div></div>
   </div>
 
   <div id="output">{"status":"initializing..."}</div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-// LDSS v4.1 - IMAGE SUPPORT via Direct Injection
-// Architecture by Anzize Daouda + Image Enhancement
+// LDSS v4.2 - PERSISTENCE TEST EDITION
 // ═══════════════════════════════════════════════════════════════
 
 const LDSS = {
@@ -54,10 +76,11 @@ const LDSS = {
   startTime: Date.now(),
   opCount: 0,
   totalSize: 0,
-  CHUNK_SIZE: 50000, // 50KB chunks pour les grosses images
+  sessionCount: 0,
+  CHUNK_SIZE: 50000,
 
   workers: {
-    'primary': { name: 'IndexedDB-Primary', tech: 'IndexedDB', collections: ['routing', 'metadata', 'config'], count: 0 },
+    'primary': { name: 'IndexedDB-Primary', tech: 'IndexedDB', collections: ['routing', 'metadata', 'config', 'test_persistence', 'session_tracker'], count: 0 },
     'userdata': { name: 'IndexedDB-UserData', tech: 'IndexedDB', collections: ['users', 'profiles', 'settings', 'preferences'], count: 0 },
     'media': { name: 'IndexedDB-Media', tech: 'IndexedDB', collections: ['images', 'videos', 'documents', 'files', 'avatars'], count: 0 },
     'analytics': { name: 'SQLite-Analytics', tech: 'IndexedDB', collections: ['logs', 'events', 'metrics', 'analytics'], count: 0 },
@@ -78,32 +101,33 @@ const LDSS = {
     return new Promise((res, rej) => {
       const req = indexedDB.open('LDSS_v4', 2);
       req.onerror = () => rej(req.error);
-      req.onsuccess = () => { this.db = req.result; res(); };
+      req.onsuccess = () => { 
+        this.db = req.result; 
+        console.log('✅ IndexedDB opened successfully');
+        res(); 
+      };
       req.onupgradeneeded = e => {
+        console.log('🔧 Database upgrade needed, creating stores...');
         const db = e.target.result;
         Object.keys(this.workers).forEach(worker => {
           if (!db.objectStoreNames.contains(worker)) {
             const store = db.createObjectStore(worker, { keyPath: 'id', autoIncrement: true });
             store.createIndex('collection', 'collection', { unique: false });
             store.createIndex('timestamp', 'ts', { unique: false });
+            console.log(`  ✓ Created store: ${worker}`);
           }
         });
       };
     });
   },
 
-  // ─────────────────────────────────────────
-  // WRITE avec support chunking automatique
-  // ─────────────────────────────────────────
   async write(collection, data) {
     const dataStr = JSON.stringify(data);
     
-    // Si données > 100KB, utiliser chunking
     if (dataStr.length > 100000) {
       return await this.writeChunked(collection, data, dataStr);
     }
 
-    // Écriture normale
     const worker = this.getWorkerForCollection(collection);
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readwrite');
@@ -123,28 +147,29 @@ const LDSS = {
         this.opCount++;
         this.workers[worker].count++;
         this.totalSize += record.size;
+        console.log(`✅ Write OK: ${collection} (ID: ${req.result})`);
         res({ ok: true, id: req.result, worker, collection, method: 'direct' });
       };
-      req.onerror = () => rej(req.error);
+      req.onerror = () => {
+        console.error(`❌ Write FAIL: ${collection}`, req.error);
+        rej(req.error);
+      };
     });
   },
 
-  // ─────────────────────────────────────────
-  // WRITE CHUNKED pour grosses données
-  // ─────────────────────────────────────────
   async writeChunked(collection, data, dataStr) {
     const worker = this.getWorkerForCollection(collection);
     const chunks = [];
     const chunkId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
-    // Découper en chunks
     for (let i = 0; i < dataStr.length; i += this.CHUNK_SIZE) {
       chunks.push(dataStr.slice(i, i + this.CHUNK_SIZE));
     }
 
+    console.log(`📦 Chunking: ${collection} into ${chunks.length} chunks`);
+
     return new Promise(async (res, rej) => {
       try {
-        // Sauvegarder metadata
         const metaTx = this.db.transaction([worker], 'readwrite');
         const metaStore = metaTx.objectStore(worker);
         const metaId = await new Promise((r, rj) => {
@@ -165,7 +190,6 @@ const LDSS = {
           req.onerror = () => rj(req.error);
         });
 
-        // Sauvegarder chaque chunk
         for (let i = 0; i < chunks.length; i++) {
           const chunkTx = this.db.transaction([worker], 'readwrite');
           const chunkStore = chunkTx.objectStore(worker);
@@ -191,6 +215,7 @@ const LDSS = {
         this.workers[worker].count += chunks.length + 1;
         this.totalSize += dataStr.length;
 
+        console.log(`✅ Chunked write OK: ${collection} (${chunks.length} chunks)`);
         res({ 
           ok: true, 
           chunkId, 
@@ -201,14 +226,12 @@ const LDSS = {
           size: dataStr.length
         });
       } catch(e) {
+        console.error(`❌ Chunked write FAIL: ${collection}`, e);
         rej(e);
       }
     });
   },
 
-  // ─────────────────────────────────────────
-  // READ avec support reconstruction chunks
-  // ─────────────────────────────────────────
   async read(collection) {
     const worker = this.getWorkerForCollection(collection);
     return new Promise(async (res, rej) => {
@@ -221,13 +244,11 @@ const LDSS = {
         req.onsuccess = async () => {
           const results = req.result;
 
-          // Chercher si il y a des chunks
           const metaReq = idx.getAll(collection + '_meta');
           metaReq.onsuccess = async () => {
             const metas = metaReq.result;
             
             if (metas.length > 0) {
-              // Reconstruire depuis chunks
               const reconstructed = [];
               for (const meta of metas) {
                 const chunkId = meta.data.chunkId;
@@ -256,6 +277,7 @@ const LDSS = {
               }
 
               this.opCount++;
+              console.log(`✅ Read OK (reconstructed): ${collection} (${reconstructed.length} items)`);
               res({
                 ok: true,
                 collection,
@@ -265,8 +287,8 @@ const LDSS = {
                 method: 'reconstructed'
               });
             } else {
-              // Données normales
               this.opCount++;
+              console.log(`✅ Read OK: ${collection} (${results.length} items)`);
               res({
                 ok: true,
                 collection,
@@ -278,8 +300,12 @@ const LDSS = {
             }
           };
         };
-        req.onerror = () => rej(req.error);
+        req.onerror = () => {
+          console.error(`❌ Read FAIL: ${collection}`, req.error);
+          rej(req.error);
+        };
       } catch(e) {
+        console.error(`❌ Read FAIL: ${collection}`, e);
         rej(e);
       }
     });
@@ -322,7 +348,6 @@ const LDSS = {
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readonly');
       const req = tx.objectStore(worker).get(Number(id));
-
       req.onsuccess = () => {
         this.opCount++;
         res({ ok: true, data: req.result || null });
@@ -337,7 +362,6 @@ const LDSS = {
       const tx = this.db.transaction([worker], 'readonly');
       const idx = tx.objectStore(worker).index('collection');
       const req = idx.count(collection);
-
       req.onsuccess = () => {
         this.opCount++;
         res({ ok: true, collection, count: req.result });
@@ -386,7 +410,6 @@ const LDSS = {
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readwrite');
       const req = tx.objectStore(worker).delete(Number(id));
-
       req.onsuccess = () => {
         this.opCount++;
         res({ ok: true, deleted: id });
@@ -405,7 +428,6 @@ const LDSS = {
 
         data.data.forEach(item => store.delete(item.id));
 
-        // Clear chunks et meta aussi
         const metaData = await new Promise((r, rj) => {
           const mtx = this.db.transaction([worker], 'readonly');
           const idx = mtx.objectStore(worker).index('collection');
@@ -458,6 +480,7 @@ const LDSS = {
       uptime: Math.floor((Date.now() - this.startTime) / 1000),
       operations: this.opCount,
       totalSize: this.totalSize,
+      sessions: this.sessionCount,
       workers: Object.entries(this.workers).map(([k, v]) => ({
         key: k,
         name: v.name,
@@ -467,10 +490,83 @@ const LDSS = {
   }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// EXPOSE GLOBAL pour injection Puppeteer
-// ═══════════════════════════════════════════════════════════════
 window.LDSS = LDSS;
+
+// ═══════════════════════════════════════════════════════════════
+// PERSISTENCE TEST
+// ═══════════════════════════════════════════════════════════════
+
+async function runPersistenceTest() {
+  console.log('🧪 === TEST DE PERSISTANCE ===');
+  
+  const testEl = document.getElementById('persistenceTest');
+  const resultEl = document.getElementById('testResult');
+  const detailEl = document.getElementById('testDetail');
+  const iconEl = document.getElementById('persistIcon');
+  
+  try {
+    // Vérifier si session_tracker existe déjà
+    const sessions = await LDSS.read('session_tracker');
+    const previousCount = sessions.count || 0;
+    
+    console.log(`📊 Sessions précédentes: ${previousCount}`);
+    
+    // Incrémenter le compteur de sessions
+    const newSessionId = Date.now();
+    await LDSS.write('session_tracker', {
+      sessionId: newSessionId,
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent.substring(0, 50)
+    });
+    
+    // Relire pour vérifier
+    const updatedSessions = await LDSS.read('session_tracker');
+    const newCount = updatedSessions.count || 0;
+    
+    LDSS.sessionCount = newCount;
+    
+    console.log(`📊 Sessions après écriture: ${newCount}`);
+    
+    // Résultat
+    if (newCount > previousCount) {
+      testEl.classList.remove('fail');
+      iconEl.textContent = '✅';
+      resultEl.textContent = `✅ PERSISTANCE OK ! Sessions détectées: ${newCount}`;
+      detailEl.style.display = 'block';
+      detailEl.innerHTML = `
+📦 Session actuelle: ${newSessionId}<br>
+📊 Total sessions: ${newCount}<br>
+⏱️ Première session: ${updatedSessions.data[0]?.data?.timestamp || 'N/A'}<br>
+🔄 Si ce nombre augmente à chaque rechargement = PERSISTANCE FONCTIONNE
+      `;
+      
+      document.getElementById('infoBox').innerHTML = `
+        ✅ <strong>Persistance confirmée !</strong> IndexedDB garde ${newCount} session(s). 
+        Recharge la page (F5) et ce nombre devrait augmenter.
+      `;
+    } else {
+      throw new Error('Le compteur n\'a pas augmenté');
+    }
+    
+  } catch(e) {
+    console.error('❌ Test persistance échoué:', e);
+    testEl.classList.add('fail');
+    iconEl.textContent = '❌';
+    resultEl.textContent = `❌ PERSISTANCE FAIL: ${e.message}`;
+    detailEl.style.display = 'block';
+    detailEl.innerHTML = `
+⚠️ Problème détecté:<br>
+- IndexedDB ne persiste pas entre les rechargements<br>
+- Vérifiez les cookies/stockage du navigateur<br>
+- Essayez de désactiver le mode incognito<br>
+    `;
+    
+    document.getElementById('infoBox').innerHTML = `
+      ❌ <strong>Persistance échouée !</strong> Les données ne sont pas sauvegardées. 
+      Vérifie tes paramètres de cookies/stockage.
+    `;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // UI & OUTPUT
@@ -487,6 +583,7 @@ function updateUI() {
   document.getElementById('s-ops').textContent = stats.operations;
   document.getElementById('s-size').textContent = Math.round(stats.totalSize / 1024);
   document.getElementById('s-uptime').textContent = stats.uptime + 's';
+  document.getElementById('s-sessions').textContent = stats.sessions;
 
   const workersEl = document.getElementById('workers');
   workersEl.innerHTML = stats.workers.map(w => `
@@ -515,8 +612,8 @@ async function route() {
   if (!action) {
     out({ 
       status: 'ready', 
-      version: 'LDSS v4.1',
-      features: ['chunking', 'image_support', 'direct_injection'],
+      version: 'LDSS v4.2',
+      features: ['chunking', 'image_support', 'direct_injection', 'persistence_test'],
       workers: Object.keys(LDSS.workers),
       actions: ['write', 'write_batch', 'read', 'read_id', 'count', 'list', 'delete', 'clear', 'clear_all', 'stats']
     });
@@ -572,17 +669,26 @@ async function route() {
 
 (async () => {
   try {
+    console.log('🚀 LDSS v4.2 starting...');
     await LDSS.init();
+    console.log('✅ LDSS initialized');
+    
     document.getElementById('status').textContent = 'Online';
     document.getElementById('dot').style.background = '#22c55e';
 
+    // Lancer le test de persistance
+    await runPersistenceTest();
+
+    // Update uptime
     setInterval(() => {
-      document.getElementById('s-uptime').textContent = 
-        Math.floor((Date.now() - LDSS.startTime) / 1000) + 's';
+      const uptime = Math.floor((Date.now() - LDSS.startTime) / 1000);
+      document.getElementById('s-uptime').textContent = uptime + 's';
+      document.getElementById('uptime').textContent = uptime + 's';
     }, 1000);
 
     await route();
   } catch(e) {
+    console.error('❌ Init error:', e);
     document.getElementById('status').textContent = 'Error: ' + e.message;
     document.getElementById('dot').style.background = '#ef4444';
   }
