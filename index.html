@@ -215,21 +215,36 @@ const WORKER = {
       const tx = this.db.transaction(['storage'], 'readwrite');
       const store = tx.objectStore('storage');
       
+      // ✅ Utiliser dataId comme ID principal pour faciliter la récupération
       const record = {
-        id: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        id: dataId, // ✅ UTILISER LE MÊME ID
         dataId: dataId,
         data: data,
         timestamp: Date.now(),
         size: JSON.stringify(data).length
       };
       
-      const req = store.add(record);
-      req.onsuccess = () => {
-        this.storedCount++;
-        document.getElementById('storedCount').textContent = this.storedCount;
-        res(req.result);
+      // Supprimer l'ancien si existe
+      const deleteReq = store.delete(dataId);
+      deleteReq.onsuccess = () => {
+        const req = store.add(record);
+        req.onsuccess = () => {
+          this.storedCount++;
+          document.getElementById('storedCount').textContent = this.storedCount;
+          res(req.result);
+        };
+        req.onerror = () => rej(req.error);
       };
-      req.onerror = () => rej(req.error);
+      deleteReq.onerror = () => {
+        // Pas grave si n'existe pas, on ajoute quand même
+        const req = store.add(record);
+        req.onsuccess = () => {
+          this.storedCount++;
+          document.getElementById('storedCount').textContent = this.storedCount;
+          res(req.result);
+        };
+        req.onerror = () => rej(req.error);
+      };
     });
   },
   
@@ -237,16 +252,33 @@ const WORKER = {
     return new Promise((res, rej) => {
       const tx = this.db.transaction(['storage'], 'readonly');
       const store = tx.objectStore('storage');
-      const idx = store.index('dataId');
-      const req = idx.getAll(dataId);
+      
+      // ✅ Lire directement par ID
+      const req = store.get(dataId);
       
       req.onsuccess = () => {
-        res({
-          ok: true,
-          dataId: dataId,
-          count: req.result.length,
-          data: req.result
-        });
+        if (req.result) {
+          res({
+            ok: true,
+            dataId: dataId,
+            count: 1,
+            data: [req.result]
+          });
+        } else {
+          // Fallback: chercher par index
+          const idx = store.index('dataId');
+          const idxReq = idx.getAll(dataId);
+          
+          idxReq.onsuccess = () => {
+            res({
+              ok: true,
+              dataId: dataId,
+              count: idxReq.result.length,
+              data: idxReq.result
+            });
+          };
+          idxReq.onerror = () => rej(idxReq.error);
+        }
       };
       req.onerror = () => rej(req.error);
     });
