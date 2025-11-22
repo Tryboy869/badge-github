@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LDSS Node v4 - 6 Workers</title>
+  <title>LDSS Node v4.1 - Image Support</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui;background:#0a0a12;color:#e0e0e0;padding:1rem;min-height:100vh}
@@ -20,29 +20,33 @@
     .stat-val{font-size:1.5rem;font-weight:bold;color:#00d4ff}
     .stat-label{font-size:.65rem;color:#888}
     #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:.75rem;font-family:monospace;font-size:.75rem;min-height:80px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+    .badge{display:inline-block;background:#22c55e;color:#000;padding:.2rem .5rem;border-radius:4px;font-size:.7rem;font-weight:bold;margin-left:.5rem}
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>🗄️ LDSS Node v4</h1>
+    <div>
+      <h1>🗄️ LDSS Node v4.1</h1>
+      <span class="badge">IMAGE SUPPORT</span>
+    </div>
     <div class="status"><div class="dot" id="dot"></div><span id="status">Init...</span></div>
   </div>
 
   <div class="workers" id="workers"></div>
-  
+
   <div class="stats">
     <div class="stat"><div class="stat-val" id="s-total">0</div><div class="stat-label">Total Records</div></div>
     <div class="stat"><div class="stat-val" id="s-size">0</div><div class="stat-label">Size (KB)</div></div>
     <div class="stat"><div class="stat-val" id="s-ops">0</div><div class="stat-label">Operations</div></div>
     <div class="stat"><div class="stat-val" id="s-uptime">0s</div><div class="stat-label">Uptime</div></div>
   </div>
-  
+
   <div id="output">{"status":"initializing..."}</div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-// LDSS v4 - LOCAL DISTRIBUTED STORAGE SYSTEM
-// 6 Workers Architecture by Anzize Daouda
+// LDSS v4.1 - IMAGE SUPPORT via Direct Injection
+// Architecture by Anzize Daouda + Image Enhancement
 // ═══════════════════════════════════════════════════════════════
 
 const LDSS = {
@@ -50,8 +54,8 @@ const LDSS = {
   startTime: Date.now(),
   opCount: 0,
   totalSize: 0,
-  
-  // 6 Workers Configuration
+  CHUNK_SIZE: 50000, // 50KB chunks pour les grosses images
+
   workers: {
     'primary': { name: 'IndexedDB-Primary', tech: 'IndexedDB', collections: ['routing', 'metadata', 'config'], count: 0 },
     'userdata': { name: 'IndexedDB-UserData', tech: 'IndexedDB', collections: ['users', 'profiles', 'settings', 'preferences'], count: 0 },
@@ -61,21 +65,15 @@ const LDSS = {
     'large': { name: 'OPFS-Large', tech: 'IndexedDB', collections: ['backups', 'exports', 'large'], count: 0 }
   },
 
-  // ─────────────────────────────────────────
-  // ROUTING: Determine which worker handles a collection
-  // ─────────────────────────────────────────
   getWorkerForCollection(collection) {
     for (const [key, worker] of Object.entries(this.workers)) {
       if (worker.collections.some(c => collection.toLowerCase().includes(c))) {
         return key;
       }
     }
-    return 'primary'; // Default
+    return 'primary';
   },
 
-  // ─────────────────────────────────────────
-  // INIT DATABASE
-  // ─────────────────────────────────────────
   async init() {
     return new Promise((res, rej) => {
       const req = indexedDB.open('LDSS_v4', 2);
@@ -83,7 +81,6 @@ const LDSS = {
       req.onsuccess = () => { this.db = req.result; res(); };
       req.onupgradeneeded = e => {
         const db = e.target.result;
-        // Create store for each worker
         Object.keys(this.workers).forEach(worker => {
           if (!db.objectStoreNames.contains(worker)) {
             const store = db.createObjectStore(worker, { keyPath: 'id', autoIncrement: true });
@@ -96,36 +93,198 @@ const LDSS = {
   },
 
   // ─────────────────────────────────────────
-  // WRITE
+  // WRITE avec support chunking automatique
   // ─────────────────────────────────────────
   async write(collection, data) {
+    const dataStr = JSON.stringify(data);
+    
+    // Si données > 100KB, utiliser chunking
+    if (dataStr.length > 100000) {
+      return await this.writeChunked(collection, data, dataStr);
+    }
+
+    // Écriture normale
     const worker = this.getWorkerForCollection(collection);
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readwrite');
       const store = tx.objectStore(worker);
-      
+
       const record = {
         collection,
         data,
         ts: Date.now(),
-        size: JSON.stringify(data).length,
-        worker
+        size: dataStr.length,
+        worker,
+        chunked: false
       };
-      
+
       const req = store.add(record);
       req.onsuccess = () => {
         this.opCount++;
         this.workers[worker].count++;
         this.totalSize += record.size;
-        res({ ok: true, id: req.result, worker, collection });
+        res({ ok: true, id: req.result, worker, collection, method: 'direct' });
       };
       req.onerror = () => rej(req.error);
     });
   },
 
   // ─────────────────────────────────────────
-  // WRITE BATCH
+  // WRITE CHUNKED pour grosses données
   // ─────────────────────────────────────────
+  async writeChunked(collection, data, dataStr) {
+    const worker = this.getWorkerForCollection(collection);
+    const chunks = [];
+    const chunkId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    // Découper en chunks
+    for (let i = 0; i < dataStr.length; i += this.CHUNK_SIZE) {
+      chunks.push(dataStr.slice(i, i + this.CHUNK_SIZE));
+    }
+
+    return new Promise(async (res, rej) => {
+      try {
+        // Sauvegarder metadata
+        const metaTx = this.db.transaction([worker], 'readwrite');
+        const metaStore = metaTx.objectStore(worker);
+        const metaId = await new Promise((r, rj) => {
+          const req = metaStore.add({
+            collection: collection + '_meta',
+            data: {
+              chunkId,
+              totalChunks: chunks.length,
+              originalSize: dataStr.length,
+              type: 'chunked_meta'
+            },
+            ts: Date.now(),
+            size: 100,
+            worker,
+            chunked: true
+          });
+          req.onsuccess = () => r(req.result);
+          req.onerror = () => rj(req.error);
+        });
+
+        // Sauvegarder chaque chunk
+        for (let i = 0; i < chunks.length; i++) {
+          const chunkTx = this.db.transaction([worker], 'readwrite');
+          const chunkStore = chunkTx.objectStore(worker);
+          await new Promise((r, rj) => {
+            const req = chunkStore.add({
+              collection: collection + '_chunks',
+              data: {
+                chunkId,
+                index: i,
+                chunk: chunks[i]
+              },
+              ts: Date.now(),
+              size: chunks[i].length,
+              worker,
+              chunked: true
+            });
+            req.onsuccess = () => r();
+            req.onerror = () => rj(req.error);
+          });
+        }
+
+        this.opCount += chunks.length + 1;
+        this.workers[worker].count += chunks.length + 1;
+        this.totalSize += dataStr.length;
+
+        res({ 
+          ok: true, 
+          chunkId, 
+          chunks: chunks.length, 
+          worker, 
+          collection,
+          method: 'chunked',
+          size: dataStr.length
+        });
+      } catch(e) {
+        rej(e);
+      }
+    });
+  },
+
+  // ─────────────────────────────────────────
+  // READ avec support reconstruction chunks
+  // ─────────────────────────────────────────
+  async read(collection) {
+    const worker = this.getWorkerForCollection(collection);
+    return new Promise(async (res, rej) => {
+      try {
+        const tx = this.db.transaction([worker], 'readonly');
+        const store = tx.objectStore(worker);
+        const idx = store.index('collection');
+        const req = idx.getAll(collection);
+
+        req.onsuccess = async () => {
+          const results = req.result;
+
+          // Chercher si il y a des chunks
+          const metaReq = idx.getAll(collection + '_meta');
+          metaReq.onsuccess = async () => {
+            const metas = metaReq.result;
+            
+            if (metas.length > 0) {
+              // Reconstruire depuis chunks
+              const reconstructed = [];
+              for (const meta of metas) {
+                const chunkId = meta.data.chunkId;
+                const chunksReq = idx.getAll(collection + '_chunks');
+                
+                await new Promise(r => {
+                  chunksReq.onsuccess = () => {
+                    const allChunks = chunksReq.result
+                      .filter(c => c.data.chunkId === chunkId)
+                      .sort((a, b) => a.data.index - b.data.index);
+                    
+                    const fullData = allChunks.map(c => c.data.chunk).join('');
+                    const parsed = JSON.parse(fullData);
+                    reconstructed.push({
+                      id: meta.id,
+                      collection,
+                      data: parsed,
+                      ts: meta.ts,
+                      size: meta.data.originalSize,
+                      worker,
+                      reconstructed: true
+                    });
+                    r();
+                  };
+                });
+              }
+
+              this.opCount++;
+              res({
+                ok: true,
+                collection,
+                worker,
+                count: reconstructed.length,
+                data: reconstructed,
+                method: 'reconstructed'
+              });
+            } else {
+              // Données normales
+              this.opCount++;
+              res({
+                ok: true,
+                collection,
+                worker,
+                count: results.length,
+                data: results,
+                method: 'direct'
+              });
+            }
+          };
+        };
+        req.onerror = () => rej(req.error);
+      } catch(e) {
+        rej(e);
+      }
+    });
+  },
+
   async writeBatch(collection, items) {
     const worker = this.getWorkerForCollection(collection);
     return new Promise((res, rej) => {
@@ -133,7 +292,7 @@ const LDSS = {
       const store = tx.objectStore(worker);
       let count = 0;
       let totalSize = 0;
-      
+
       items.forEach(item => {
         const size = JSON.stringify(item).length;
         store.add({
@@ -141,12 +300,13 @@ const LDSS = {
           data: item,
           ts: Date.now(),
           size,
-          worker
+          worker,
+          chunked: false
         });
         count++;
         totalSize += size;
       });
-      
+
       tx.oncomplete = () => {
         this.opCount += count;
         this.workers[worker].count += count;
@@ -157,40 +317,12 @@ const LDSS = {
     });
   },
 
-  // ─────────────────────────────────────────
-  // READ
-  // ─────────────────────────────────────────
-  async read(collection) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise((res, rej) => {
-      const tx = this.db.transaction([worker], 'readonly');
-      const store = tx.objectStore(worker);
-      const idx = store.index('collection');
-      const req = idx.getAll(collection);
-      
-      req.onsuccess = () => {
-        this.opCount++;
-        res({
-          ok: true,
-          collection,
-          worker,
-          count: req.result.length,
-          data: req.result
-        });
-      };
-      req.onerror = () => rej(req.error);
-    });
-  },
-
-  // ─────────────────────────────────────────
-  // READ BY ID
-  // ─────────────────────────────────────────
   async readById(collection, id) {
     const worker = this.getWorkerForCollection(collection);
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readonly');
       const req = tx.objectStore(worker).get(Number(id));
-      
+
       req.onsuccess = () => {
         this.opCount++;
         res({ ok: true, data: req.result || null });
@@ -199,16 +331,13 @@ const LDSS = {
     });
   },
 
-  // ─────────────────────────────────────────
-  // COUNT
-  // ─────────────────────────────────────────
   async count(collection) {
     const worker = this.getWorkerForCollection(collection);
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readonly');
       const idx = tx.objectStore(worker).index('collection');
       const req = idx.count(collection);
-      
+
       req.onsuccess = () => {
         this.opCount++;
         res({ ok: true, collection, count: req.result });
@@ -217,12 +346,9 @@ const LDSS = {
     });
   },
 
-  // ─────────────────────────────────────────
-  // LIST ALL
-  // ─────────────────────────────────────────
   async list() {
     const results = { ok: true, workers: {}, collections: {}, total: 0 };
-    
+
     for (const [workerKey, workerInfo] of Object.entries(this.workers)) {
       try {
         const data = await new Promise((res, rej) => {
@@ -231,12 +357,12 @@ const LDSS = {
           req.onsuccess = () => res(req.result);
           req.onerror = () => rej(req.error);
         });
-        
+
         results.workers[workerKey] = {
           name: workerInfo.name,
           count: data.length
         };
-        
+
         data.forEach(item => {
           if (!results.collections[item.collection]) {
             results.collections[item.collection] = 0;
@@ -244,26 +370,23 @@ const LDSS = {
           results.collections[item.collection]++;
           results.total++;
         });
-        
+
         this.workers[workerKey].count = data.length;
       } catch(e) {
         results.workers[workerKey] = { name: workerInfo.name, count: 0, error: e.message };
       }
     }
-    
+
     this.opCount++;
     return results;
   },
 
-  // ─────────────────────────────────────────
-  // DELETE
-  // ─────────────────────────────────────────
   async delete(collection, id) {
     const worker = this.getWorkerForCollection(collection);
     return new Promise((res, rej) => {
       const tx = this.db.transaction([worker], 'readwrite');
       const req = tx.objectStore(worker).delete(Number(id));
-      
+
       req.onsuccess = () => {
         this.opCount++;
         res({ ok: true, deleted: id });
@@ -272,20 +395,38 @@ const LDSS = {
     });
   },
 
-  // ─────────────────────────────────────────
-  // CLEAR COLLECTION
-  // ─────────────────────────────────────────
   async clearCollection(collection) {
     const worker = this.getWorkerForCollection(collection);
     return new Promise(async (res, rej) => {
       try {
-        // Get all IDs for this collection
         const data = await this.read(collection);
         const tx = this.db.transaction([worker], 'readwrite');
         const store = tx.objectStore(worker);
-        
+
         data.data.forEach(item => store.delete(item.id));
-        
+
+        // Clear chunks et meta aussi
+        const metaData = await new Promise((r, rj) => {
+          const mtx = this.db.transaction([worker], 'readonly');
+          const idx = mtx.objectStore(worker).index('collection');
+          const req = idx.getAll(collection + '_meta');
+          req.onsuccess = () => r(req.result);
+          req.onerror = () => rj(req.error);
+        });
+
+        const chunkData = await new Promise((r, rj) => {
+          const ctx = this.db.transaction([worker], 'readonly');
+          const idx = ctx.objectStore(worker).index('collection');
+          const req = idx.getAll(collection + '_chunks');
+          req.onsuccess = () => r(req.result);
+          req.onerror = () => rj(req.error);
+        });
+
+        const clearTx = this.db.transaction([worker], 'readwrite');
+        const clearStore = clearTx.objectStore(worker);
+        metaData.forEach(m => clearStore.delete(m.id));
+        chunkData.forEach(c => clearStore.delete(c.id));
+
         tx.oncomplete = () => {
           this.opCount++;
           res({ ok: true, cleared: collection, count: data.count });
@@ -297,9 +438,6 @@ const LDSS = {
     });
   },
 
-  // ─────────────────────────────────────────
-  // CLEAR ALL
-  // ─────────────────────────────────────────
   async clearAll() {
     for (const workerKey of Object.keys(this.workers)) {
       await new Promise((res, rej) => {
@@ -315,9 +453,6 @@ const LDSS = {
     return { ok: true, msg: 'All workers cleared' };
   },
 
-  // ─────────────────────────────────────────
-  // GET STATS
-  // ─────────────────────────────────────────
   getStats() {
     return {
       uptime: Math.floor((Date.now() - this.startTime) / 1000),
@@ -333,6 +468,11 @@ const LDSS = {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// EXPOSE GLOBAL pour injection Puppeteer
+// ═══════════════════════════════════════════════════════════════
+window.LDSS = LDSS;
+
+// ═══════════════════════════════════════════════════════════════
 // UI & OUTPUT
 // ═══════════════════════════════════════════════════════════════
 
@@ -343,13 +483,11 @@ function out(data) {
 
 function updateUI() {
   const stats = LDSS.getStats();
-  
-  // Stats
+
   document.getElementById('s-ops').textContent = stats.operations;
   document.getElementById('s-size').textContent = Math.round(stats.totalSize / 1024);
   document.getElementById('s-uptime').textContent = stats.uptime + 's';
-  
-  // Workers
+
   const workersEl = document.getElementById('workers');
   workersEl.innerHTML = stats.workers.map(w => `
     <div class="worker">
@@ -357,8 +495,7 @@ function updateUI() {
       <div class="worker-count">${w.count}</div>
     </div>
   `).join('');
-  
-  // Total
+
   LDSS.list().then(r => {
     document.getElementById('s-total').textContent = r.total;
   });
@@ -374,17 +511,18 @@ async function route() {
   const col = p.get('collection');
   const dataStr = p.get('data');
   const id = p.get('id');
-  
+
   if (!action) {
     out({ 
       status: 'ready', 
-      version: 'LDSS v4',
+      version: 'LDSS v4.1',
+      features: ['chunking', 'image_support', 'direct_injection'],
       workers: Object.keys(LDSS.workers),
       actions: ['write', 'write_batch', 'read', 'read_id', 'count', 'list', 'delete', 'clear', 'clear_all', 'stats']
     });
     return;
   }
-  
+
   try {
     let r;
     switch(action) {
@@ -437,13 +575,12 @@ async function route() {
     await LDSS.init();
     document.getElementById('status').textContent = 'Online';
     document.getElementById('dot').style.background = '#22c55e';
-    
-    // Update uptime every second
+
     setInterval(() => {
       document.getElementById('s-uptime').textContent = 
         Math.floor((Date.now() - LDSS.startTime) / 1000) + 's';
     }, 1000);
-    
+
     await route();
   } catch(e) {
     document.getElementById('status').textContent = 'Error: ' + e.message;
