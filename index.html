@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LDSS v4.2 - Persistence Test</title>
+  <title>LDSS v5 - Autonomous Worker</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui;background:#0a0a12;color:#e0e0e0;padding:1rem;min-height:100vh}
@@ -13,653 +13,304 @@
     .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
     .badge{background:#7b2cbf;color:#fff;padding:.3rem .7rem;border-radius:6px;font-size:.75rem;font-weight:bold}
-    .workers{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-bottom:1rem}
-    .worker{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:.5rem;font-size:.75rem}
-    .worker-name{color:#00d4ff;font-weight:600}
-    .worker-count{font-size:1.2rem;font-weight:bold}
-    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:1rem}
+    .worker-status{background:rgba(34,197,94,.1);border:2px solid #22c55e;border-radius:8px;padding:1rem;margin-bottom:1rem}
+    .worker-status h3{margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem;color:#22c55e}
+    .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin:1rem 0}
     .stat{background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.2);border-radius:6px;padding:.5rem;text-align:center}
     .stat-val{font-size:1.5rem;font-weight:bold;color:#00d4ff}
-    .stat-label{font-size:.65rem;color:#888}
-    .persistence-test{background:rgba(34,197,94,.1);border:2px solid #22c55e;border-radius:8px;padding:1rem;margin-bottom:1rem}
-    .persistence-test.fail{background:rgba(239,68,68,.1);border-color:#ef4444}
-    .persistence-test h3{margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
-    .test-result{font-family:monospace;font-size:.8rem;margin:.5rem 0;padding:.5rem;background:#000;border-radius:4px}
-    #output{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:.75rem;font-family:monospace;font-size:.75rem;min-height:80px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-    .info-box{background:rgba(234,179,8,.1);border:1px solid #eab308;border-radius:8px;padding:1rem;margin-bottom:1rem;font-size:.85rem}
+    .stat-label{font-size:.65rem;color:#888;margin-top:.3rem}
+    .log-box{background:#000;border:2px solid #7b2cbf;border-radius:8px;padding:.75rem;font-family:monospace;font-size:.75rem;max-height:300px;overflow-y:auto}
+    .log-entry{padding:.3rem 0;border-bottom:1px solid #1a1a2e}
+    .log-entry:last-child{border:none}
+    .log-success{color:#22c55e}
+    .log-error{color:#ef4444}
+    .log-info{color:#00d4ff}
+    .log-time{color:#666;margin-right:.5rem}
+    .config-box{background:rgba(234,179,8,.1);border:1px solid #eab308;border-radius:8px;padding:1rem;margin-bottom:1rem}
+    .config-box input{background:#1a1a2e;border:1px solid #3a3a4e;color:#e0e0e0;padding:.5rem;border-radius:4px;width:100%;margin-top:.5rem}
+    .btn{background:linear-gradient(90deg,#7b2cbf,#00d4ff);border:none;padding:.5rem 1rem;border-radius:6px;color:#fff;font-weight:600;cursor:pointer;margin-top:.5rem}
   </style>
 </head>
 <body>
   <div class="header">
     <div>
-      <h1>🗄️ LDSS v4.2</h1>
-      <span class="badge">PERSISTENCE TEST</span>
+      <h1>🤖 LDSS v5 - Autonomous Worker</h1>
+      <span class="badge">AUTO-POLLING</span>
     </div>
     <div class="status">
       <div class="dot" id="dot"></div>
-      <span id="status">Init...</span>
-      <span id="uptime" style="color:#888;font-size:.8rem;margin-left:1rem">0s</span>
+      <span id="status">Starting...</span>
     </div>
   </div>
 
-  <div class="info-box" id="infoBox">
-    🧪 <strong>Test de persistance automatique au démarrage...</strong>
+  <div class="config-box">
+    <label style="color:#eab308;font-weight:600">🔧 Configuration Serveur</label>
+    <input type="text" id="serverUrl" placeholder="https://ton-serveur.onrender.com" value="">
+    <button class="btn" onclick="updateServerUrl()">💾 Mettre à jour</button>
+    <div style="font-size:.8rem;color:#888;margin-top:.5rem">
+      Le worker poll automatiquement ce serveur toutes les 5 secondes
+    </div>
   </div>
 
-  <div class="persistence-test" id="persistenceTest">
-    <h3>
-      <span id="persistIcon">🔄</span>
-      <span>Test de Persistance IndexedDB</span>
-    </h3>
-    <div class="test-result" id="testResult">Analyse en cours...</div>
-    <div class="test-result" id="testDetail" style="display:none"></div>
+  <div class="worker-status">
+    <h3>🔄 État du Worker</h3>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-val" id="pollCount">0</div>
+        <div class="stat-label">Polls effectués</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="downloadCount">0</div>
+        <div class="stat-label">Téléchargements</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="storedCount">0</div>
+        <div class="stat-label">Stockés</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="errorCount">0</div>
+        <div class="stat-label">Erreurs</div>
+      </div>
+    </div>
+    <div style="text-align:center;color:#888;font-size:.8rem">
+      Prochain poll dans <span id="nextPoll">5</span>s
+    </div>
   </div>
 
-  <div class="workers" id="workers"></div>
-
-  <div class="stats">
-    <div class="stat"><div class="stat-val" id="s-total">0</div><div class="stat-label">Total Records</div></div>
-    <div class="stat"><div class="stat-val" id="s-size">0</div><div class="stat-label">Size (KB)</div></div>
-    <div class="stat"><div class="stat-val" id="s-ops">0</div><div class="stat-label">Operations</div></div>
-    <div class="stat"><div class="stat-val" id="s-sessions">0</div><div class="stat-label">Sessions</div></div>
+  <div style="margin-bottom:.5rem">
+    <strong style="color:#00d4ff">📋 Logs en temps réel</strong>
   </div>
-
-  <div id="output">{"status":"initializing..."}</div>
+  <div class="log-box" id="logs"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-// LDSS v4.2 - PERSISTENCE TEST EDITION
+// LDSS v5 - AUTONOMOUS WORKER
+// Poll automatiquement un serveur et stocke les données
 // ═══════════════════════════════════════════════════════════════
 
-const LDSS = {
+const WORKER = {
   db: null,
-  startTime: Date.now(),
-  opCount: 0,
-  totalSize: 0,
-  sessionCount: 0,
-  CHUNK_SIZE: 50000,
-
-  workers: {
-    'primary': { name: 'IndexedDB-Primary', tech: 'IndexedDB', collections: ['routing', 'metadata', 'config', 'test_persistence', 'session_tracker'], count: 0 },
-    'userdata': { name: 'IndexedDB-UserData', tech: 'IndexedDB', collections: ['users', 'profiles', 'settings', 'preferences'], count: 0 },
-    'media': { name: 'IndexedDB-Media', tech: 'IndexedDB', collections: ['images', 'videos', 'documents', 'files', 'avatars'], count: 0 },
-    'analytics': { name: 'SQLite-Analytics', tech: 'IndexedDB', collections: ['logs', 'events', 'metrics', 'analytics'], count: 0 },
-    'cache': { name: 'Cache-Assets', tech: 'IndexedDB', collections: ['cache', 'assets', 'temp'], count: 0 },
-    'large': { name: 'OPFS-Large', tech: 'IndexedDB', collections: ['backups', 'exports', 'large'], count: 0 }
-  },
-
-  getWorkerForCollection(collection) {
-    for (const [key, worker] of Object.entries(this.workers)) {
-      if (worker.collections.some(c => collection.toLowerCase().includes(c))) {
-        return key;
-      }
-    }
-    return 'primary';
-  },
-
+  serverUrl: localStorage.getItem('ldss_server_url') || '',
+  pollInterval: 5000, // 5 secondes
+  pollCount: 0,
+  downloadCount: 0,
+  storedCount: 0,
+  errorCount: 0,
+  isPolling: false,
+  
   async init() {
+    // Ouvrir IndexedDB
     return new Promise((res, rej) => {
-      const req = indexedDB.open('LDSS_v4', 2);
+      const req = indexedDB.open('LDSS_v5', 1);
       req.onerror = () => rej(req.error);
       req.onsuccess = () => { 
         this.db = req.result; 
-        console.log('✅ IndexedDB opened successfully');
         res(); 
       };
       req.onupgradeneeded = e => {
-        console.log('🔧 Database upgrade needed, creating stores...');
         const db = e.target.result;
-        Object.keys(this.workers).forEach(worker => {
-          if (!db.objectStoreNames.contains(worker)) {
-            const store = db.createObjectStore(worker, { keyPath: 'id', autoIncrement: true });
-            store.createIndex('collection', 'collection', { unique: false });
-            store.createIndex('timestamp', 'ts', { unique: false });
-            console.log(`  ✓ Created store: ${worker}`);
-          }
-        });
+        if (!db.objectStoreNames.contains('storage')) {
+          const store = db.createObjectStore('storage', { keyPath: 'id' });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
+          store.createIndex('dataId', 'dataId', { unique: false });
+        }
       };
     });
   },
-
-  async write(collection, data) {
-    const dataStr = JSON.stringify(data);
+  
+  log(type, message) {
+    const time = new Date().toLocaleTimeString();
+    const logEl = document.getElementById('logs');
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    entry.innerHTML = `<span class="log-time">${time}</span>${message}`;
+    logEl.insertBefore(entry, logEl.firstChild);
     
-    if (dataStr.length > 100000) {
-      return await this.writeChunked(collection, data, dataStr);
+    // Garder seulement les 50 derniers logs
+    while (logEl.children.length > 50) {
+      logEl.removeChild(logEl.lastChild);
     }
-
-    const worker = this.getWorkerForCollection(collection);
+    
+    console.log(`[${type.toUpperCase()}] ${message}`);
+  },
+  
+  async poll() {
+    if (!this.serverUrl) {
+      this.log('info', '⏸️  Pas de serveur configuré, en attente...');
+      return;
+    }
+    
+    this.pollCount++;
+    document.getElementById('pollCount').textContent = this.pollCount;
+    
+    try {
+      this.log('info', `🔍 Poll ${this.pollCount}: ${this.serverUrl}/api/pending`);
+      
+      const response = await fetch(`${this.serverUrl}/api/pending`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const pending = await response.json();
+      
+      if (pending.ids && pending.ids.length > 0) {
+        this.log('success', `📦 ${pending.ids.length} données en attente`);
+        
+        for (const id of pending.ids) {
+          await this.downloadAndStore(id);
+        }
+      } else {
+        this.log('info', '✓ Aucune donnée en attente');
+      }
+      
+    } catch(e) {
+      this.errorCount++;
+      document.getElementById('errorCount').textContent = this.errorCount;
+      this.log('error', `❌ Erreur poll: ${e.message}`);
+    }
+  },
+  
+  async downloadAndStore(id) {
+    try {
+      this.log('info', `📥 Téléchargement: ${id}`);
+      
+      const response = await fetch(`${this.serverUrl}/api/queue/${id}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const payload = await response.json();
+      
+      this.downloadCount++;
+      document.getElementById('downloadCount').textContent = this.downloadCount;
+      
+      // Stocker dans IndexedDB
+      await this.store(id, payload);
+      
+      // Confirmer au serveur
+      await fetch(`${this.serverUrl}/api/confirm/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      this.log('success', `✅ Stocké: ${id} (${JSON.stringify(payload).length} bytes)`);
+      
+    } catch(e) {
+      this.errorCount++;
+      document.getElementById('errorCount').textContent = this.errorCount;
+      this.log('error', `❌ Erreur download ${id}: ${e.message}`);
+    }
+  },
+  
+  async store(dataId, data) {
     return new Promise((res, rej) => {
-      const tx = this.db.transaction([worker], 'readwrite');
-      const store = tx.objectStore(worker);
-
+      const tx = this.db.transaction(['storage'], 'readwrite');
+      const store = tx.objectStore('storage');
+      
       const record = {
-        collection,
-        data,
-        ts: Date.now(),
-        size: dataStr.length,
-        worker,
-        chunked: false
+        id: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        dataId: dataId,
+        data: data,
+        timestamp: Date.now(),
+        size: JSON.stringify(data).length
       };
-
+      
       const req = store.add(record);
       req.onsuccess = () => {
-        this.opCount++;
-        this.workers[worker].count++;
-        this.totalSize += record.size;
-        console.log(`✅ Write OK: ${collection} (ID: ${req.result})`);
-        res({ ok: true, id: req.result, worker, collection, method: 'direct' });
+        this.storedCount++;
+        document.getElementById('storedCount').textContent = this.storedCount;
+        res(req.result);
       };
-      req.onerror = () => {
-        console.error(`❌ Write FAIL: ${collection}`, req.error);
-        rej(req.error);
-      };
+      req.onerror = () => rej(req.error);
     });
   },
-
-  async writeChunked(collection, data, dataStr) {
-    const worker = this.getWorkerForCollection(collection);
-    const chunks = [];
-    const chunkId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  
+  async read(dataId) {
+    return new Promise((res, rej) => {
+      const tx = this.db.transaction(['storage'], 'readonly');
+      const store = tx.objectStore('storage');
+      const idx = store.index('dataId');
+      const req = idx.getAll(dataId);
+      
+      req.onsuccess = () => {
+        res({
+          ok: true,
+          dataId: dataId,
+          count: req.result.length,
+          data: req.result
+        });
+      };
+      req.onerror = () => rej(req.error);
+    });
+  },
+  
+  async readAll() {
+    return new Promise((res, rej) => {
+      const tx = this.db.transaction(['storage'], 'readonly');
+      const req = tx.objectStore('storage').getAll();
+      
+      req.onsuccess = () => {
+        res({
+          ok: true,
+          count: req.result.length,
+          data: req.result
+        });
+      };
+      req.onerror = () => rej(req.error);
+    });
+  },
+  
+  startPolling() {
+    if (this.isPolling) return;
+    this.isPolling = true;
     
-    for (let i = 0; i < dataStr.length; i += this.CHUNK_SIZE) {
-      chunks.push(dataStr.slice(i, i + this.CHUNK_SIZE));
-    }
-
-    console.log(`📦 Chunking: ${collection} into ${chunks.length} chunks`);
-
-    return new Promise(async (res, rej) => {
-      try {
-        const metaTx = this.db.transaction([worker], 'readwrite');
-        const metaStore = metaTx.objectStore(worker);
-        const metaId = await new Promise((r, rj) => {
-          const req = metaStore.add({
-            collection: collection + '_meta',
-            data: {
-              chunkId,
-              totalChunks: chunks.length,
-              originalSize: dataStr.length,
-              type: 'chunked_meta'
-            },
-            ts: Date.now(),
-            size: 100,
-            worker,
-            chunked: true
-          });
-          req.onsuccess = () => r(req.result);
-          req.onerror = () => rj(req.error);
-        });
-
-        for (let i = 0; i < chunks.length; i++) {
-          const chunkTx = this.db.transaction([worker], 'readwrite');
-          const chunkStore = chunkTx.objectStore(worker);
-          await new Promise((r, rj) => {
-            const req = chunkStore.add({
-              collection: collection + '_chunks',
-              data: {
-                chunkId,
-                index: i,
-                chunk: chunks[i]
-              },
-              ts: Date.now(),
-              size: chunks[i].length,
-              worker,
-              chunked: true
-            });
-            req.onsuccess = () => r();
-            req.onerror = () => rj(req.error);
-          });
-        }
-
-        this.opCount += chunks.length + 1;
-        this.workers[worker].count += chunks.length + 1;
-        this.totalSize += dataStr.length;
-
-        console.log(`✅ Chunked write OK: ${collection} (${chunks.length} chunks)`);
-        res({ 
-          ok: true, 
-          chunkId, 
-          chunks: chunks.length, 
-          worker, 
-          collection,
-          method: 'chunked',
-          size: dataStr.length
-        });
-      } catch(e) {
-        console.error(`❌ Chunked write FAIL: ${collection}`, e);
-        rej(e);
-      }
-    });
-  },
-
-  async read(collection) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise(async (res, rej) => {
-      try {
-        const tx = this.db.transaction([worker], 'readonly');
-        const store = tx.objectStore(worker);
-        const idx = store.index('collection');
-        const req = idx.getAll(collection);
-
-        req.onsuccess = async () => {
-          const results = req.result;
-
-          const metaReq = idx.getAll(collection + '_meta');
-          metaReq.onsuccess = async () => {
-            const metas = metaReq.result;
-            
-            if (metas.length > 0) {
-              const reconstructed = [];
-              for (const meta of metas) {
-                const chunkId = meta.data.chunkId;
-                const chunksReq = idx.getAll(collection + '_chunks');
-                
-                await new Promise(r => {
-                  chunksReq.onsuccess = () => {
-                    const allChunks = chunksReq.result
-                      .filter(c => c.data.chunkId === chunkId)
-                      .sort((a, b) => a.data.index - b.data.index);
-                    
-                    const fullData = allChunks.map(c => c.data.chunk).join('');
-                    const parsed = JSON.parse(fullData);
-                    reconstructed.push({
-                      id: meta.id,
-                      collection,
-                      data: parsed,
-                      ts: meta.ts,
-                      size: meta.data.originalSize,
-                      worker,
-                      reconstructed: true
-                    });
-                    r();
-                  };
-                });
-              }
-
-              this.opCount++;
-              console.log(`✅ Read OK (reconstructed): ${collection} (${reconstructed.length} items)`);
-              res({
-                ok: true,
-                collection,
-                worker,
-                count: reconstructed.length,
-                data: reconstructed,
-                method: 'reconstructed'
-              });
-            } else {
-              this.opCount++;
-              console.log(`✅ Read OK: ${collection} (${results.length} items)`);
-              res({
-                ok: true,
-                collection,
-                worker,
-                count: results.length,
-                data: results,
-                method: 'direct'
-              });
-            }
-          };
-        };
-        req.onerror = () => {
-          console.error(`❌ Read FAIL: ${collection}`, req.error);
-          rej(req.error);
-        };
-      } catch(e) {
-        console.error(`❌ Read FAIL: ${collection}`, e);
-        rej(e);
-      }
-    });
-  },
-
-  async writeBatch(collection, items) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise((res, rej) => {
-      const tx = this.db.transaction([worker], 'readwrite');
-      const store = tx.objectStore(worker);
-      let count = 0;
-      let totalSize = 0;
-
-      items.forEach(item => {
-        const size = JSON.stringify(item).length;
-        store.add({
-          collection,
-          data: item,
-          ts: Date.now(),
-          size,
-          worker,
-          chunked: false
-        });
-        count++;
-        totalSize += size;
-      });
-
-      tx.oncomplete = () => {
-        this.opCount += count;
-        this.workers[worker].count += count;
-        this.totalSize += totalSize;
-        res({ ok: true, count, worker, collection });
-      };
-      tx.onerror = () => rej(tx.error);
-    });
-  },
-
-  async readById(collection, id) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise((res, rej) => {
-      const tx = this.db.transaction([worker], 'readonly');
-      const req = tx.objectStore(worker).get(Number(id));
-      req.onsuccess = () => {
-        this.opCount++;
-        res({ ok: true, data: req.result || null });
-      };
-      req.onerror = () => rej(req.error);
-    });
-  },
-
-  async count(collection) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise((res, rej) => {
-      const tx = this.db.transaction([worker], 'readonly');
-      const idx = tx.objectStore(worker).index('collection');
-      const req = idx.count(collection);
-      req.onsuccess = () => {
-        this.opCount++;
-        res({ ok: true, collection, count: req.result });
-      };
-      req.onerror = () => rej(req.error);
-    });
-  },
-
-  async list() {
-    const results = { ok: true, workers: {}, collections: {}, total: 0 };
-
-    for (const [workerKey, workerInfo] of Object.entries(this.workers)) {
-      try {
-        const data = await new Promise((res, rej) => {
-          const tx = this.db.transaction([workerKey], 'readonly');
-          const req = tx.objectStore(workerKey).getAll();
-          req.onsuccess = () => res(req.result);
-          req.onerror = () => rej(req.error);
-        });
-
-        results.workers[workerKey] = {
-          name: workerInfo.name,
-          count: data.length
-        };
-
-        data.forEach(item => {
-          if (!results.collections[item.collection]) {
-            results.collections[item.collection] = 0;
-          }
-          results.collections[item.collection]++;
-          results.total++;
-        });
-
-        this.workers[workerKey].count = data.length;
-      } catch(e) {
-        results.workers[workerKey] = { name: workerInfo.name, count: 0, error: e.message };
-      }
-    }
-
-    this.opCount++;
-    return results;
-  },
-
-  async delete(collection, id) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise((res, rej) => {
-      const tx = this.db.transaction([worker], 'readwrite');
-      const req = tx.objectStore(worker).delete(Number(id));
-      req.onsuccess = () => {
-        this.opCount++;
-        res({ ok: true, deleted: id });
-      };
-      req.onerror = () => rej(req.error);
-    });
-  },
-
-  async clearCollection(collection) {
-    const worker = this.getWorkerForCollection(collection);
-    return new Promise(async (res, rej) => {
-      try {
-        const data = await this.read(collection);
-        const tx = this.db.transaction([worker], 'readwrite');
-        const store = tx.objectStore(worker);
-
-        data.data.forEach(item => store.delete(item.id));
-
-        const metaData = await new Promise((r, rj) => {
-          const mtx = this.db.transaction([worker], 'readonly');
-          const idx = mtx.objectStore(worker).index('collection');
-          const req = idx.getAll(collection + '_meta');
-          req.onsuccess = () => r(req.result);
-          req.onerror = () => rj(req.error);
-        });
-
-        const chunkData = await new Promise((r, rj) => {
-          const ctx = this.db.transaction([worker], 'readonly');
-          const idx = ctx.objectStore(worker).index('collection');
-          const req = idx.getAll(collection + '_chunks');
-          req.onsuccess = () => r(req.result);
-          req.onerror = () => rj(req.error);
-        });
-
-        const clearTx = this.db.transaction([worker], 'readwrite');
-        const clearStore = clearTx.objectStore(worker);
-        metaData.forEach(m => clearStore.delete(m.id));
-        chunkData.forEach(c => clearStore.delete(c.id));
-
-        tx.oncomplete = () => {
-          this.opCount++;
-          res({ ok: true, cleared: collection, count: data.count });
-        };
-        tx.onerror = () => rej(tx.error);
-      } catch(e) {
-        rej(e);
-      }
-    });
-  },
-
-  async clearAll() {
-    for (const workerKey of Object.keys(this.workers)) {
-      await new Promise((res, rej) => {
-        const tx = this.db.transaction([workerKey], 'readwrite');
-        const req = tx.objectStore(workerKey).clear();
-        req.onsuccess = () => res();
-        req.onerror = () => rej(req.error);
-      });
-      this.workers[workerKey].count = 0;
-    }
-    this.totalSize = 0;
-    this.opCount++;
-    return { ok: true, msg: 'All workers cleared' };
-  },
-
-  getStats() {
-    return {
-      uptime: Math.floor((Date.now() - this.startTime) / 1000),
-      operations: this.opCount,
-      totalSize: this.totalSize,
-      sessions: this.sessionCount,
-      workers: Object.entries(this.workers).map(([k, v]) => ({
-        key: k,
-        name: v.name,
-        count: v.count
-      }))
+    const pollLoop = async () => {
+      await this.poll();
+      
+      // Countdown
+      let remaining = this.pollInterval / 1000;
+      const countdown = setInterval(() => {
+        remaining--;
+        document.getElementById('nextPoll').textContent = remaining;
+        if (remaining <= 0) clearInterval(countdown);
+      }, 1000);
+      
+      setTimeout(pollLoop, this.pollInterval);
     };
+    
+    pollLoop();
+    this.log('success', '🚀 Worker démarré, polling toutes les 5s');
   }
 };
 
-window.LDSS = LDSS;
+// Exposer globalement pour Puppeteer
+window.LDSS_WORKER = WORKER;
 
 // ═══════════════════════════════════════════════════════════════
-// PERSISTENCE TEST
+// UI FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
-async function runPersistenceTest() {
-  console.log('🧪 === TEST DE PERSISTANCE ===');
-  
-  const testEl = document.getElementById('persistenceTest');
-  const resultEl = document.getElementById('testResult');
-  const detailEl = document.getElementById('testDetail');
-  const iconEl = document.getElementById('persistIcon');
-  
-  try {
-    // Vérifier si session_tracker existe déjà
-    const sessions = await LDSS.read('session_tracker');
-    const previousCount = sessions.count || 0;
-    
-    console.log(`📊 Sessions précédentes: ${previousCount}`);
-    
-    // Incrémenter le compteur de sessions
-    const newSessionId = Date.now();
-    await LDSS.write('session_tracker', {
-      sessionId: newSessionId,
-      timestamp: new Date().toISOString(),
-      userAgent: navigator.userAgent.substring(0, 50)
-    });
-    
-    // Relire pour vérifier
-    const updatedSessions = await LDSS.read('session_tracker');
-    const newCount = updatedSessions.count || 0;
-    
-    LDSS.sessionCount = newCount;
-    
-    console.log(`📊 Sessions après écriture: ${newCount}`);
-    
-    // Résultat
-    if (newCount > previousCount) {
-      testEl.classList.remove('fail');
-      iconEl.textContent = '✅';
-      resultEl.textContent = `✅ PERSISTANCE OK ! Sessions détectées: ${newCount}`;
-      detailEl.style.display = 'block';
-      detailEl.innerHTML = `
-📦 Session actuelle: ${newSessionId}<br>
-📊 Total sessions: ${newCount}<br>
-⏱️ Première session: ${updatedSessions.data[0]?.data?.timestamp || 'N/A'}<br>
-🔄 Si ce nombre augmente à chaque rechargement = PERSISTANCE FONCTIONNE
-      `;
-      
-      document.getElementById('infoBox').innerHTML = `
-        ✅ <strong>Persistance confirmée !</strong> IndexedDB garde ${newCount} session(s). 
-        Recharge la page (F5) et ce nombre devrait augmenter.
-      `;
-    } else {
-      throw new Error('Le compteur n\'a pas augmenté');
-    }
-    
-  } catch(e) {
-    console.error('❌ Test persistance échoué:', e);
-    testEl.classList.add('fail');
-    iconEl.textContent = '❌';
-    resultEl.textContent = `❌ PERSISTANCE FAIL: ${e.message}`;
-    detailEl.style.display = 'block';
-    detailEl.innerHTML = `
-⚠️ Problème détecté:<br>
-- IndexedDB ne persiste pas entre les rechargements<br>
-- Vérifiez les cookies/stockage du navigateur<br>
-- Essayez de désactiver le mode incognito<br>
-    `;
-    
-    document.getElementById('infoBox').innerHTML = `
-      ❌ <strong>Persistance échouée !</strong> Les données ne sont pas sauvegardées. 
-      Vérifie tes paramètres de cookies/stockage.
-    `;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// UI & OUTPUT
-// ═══════════════════════════════════════════════════════════════
-
-function out(data) {
-  document.getElementById('output').textContent = JSON.stringify(data, null, 2);
-  updateUI();
-}
-
-function updateUI() {
-  const stats = LDSS.getStats();
-
-  document.getElementById('s-ops').textContent = stats.operations;
-  document.getElementById('s-size').textContent = Math.round(stats.totalSize / 1024);
-  document.getElementById('s-uptime').textContent = stats.uptime + 's';
-  document.getElementById('s-sessions').textContent = stats.sessions;
-
-  const workersEl = document.getElementById('workers');
-  workersEl.innerHTML = stats.workers.map(w => `
-    <div class="worker">
-      <div class="worker-name">${w.name}</div>
-      <div class="worker-count">${w.count}</div>
-    </div>
-  `).join('');
-
-  LDSS.list().then(r => {
-    document.getElementById('s-total').textContent = r.total;
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════
-// URL ROUTER
-// ═══════════════════════════════════════════════════════════════
-
-async function route() {
-  const p = new URLSearchParams(location.search);
-  const action = p.get('action');
-  const col = p.get('collection');
-  const dataStr = p.get('data');
-  const id = p.get('id');
-
-  if (!action) {
-    out({ 
-      status: 'ready', 
-      version: 'LDSS v4.2',
-      features: ['chunking', 'image_support', 'direct_injection', 'persistence_test'],
-      workers: Object.keys(LDSS.workers),
-      actions: ['write', 'write_batch', 'read', 'read_id', 'count', 'list', 'delete', 'clear', 'clear_all', 'stats']
-    });
+function updateServerUrl() {
+  const url = document.getElementById('serverUrl').value.trim();
+  if (!url) {
+    alert('❌ URL vide');
     return;
   }
-
-  try {
-    let r;
-    switch(action) {
-      case 'write':
-        r = await LDSS.write(col, JSON.parse(decodeURIComponent(dataStr)));
-        break;
-      case 'write_batch':
-        const batch = JSON.parse(decodeURIComponent(dataStr));
-        r = await LDSS.writeBatch(col, batch.batch || batch);
-        break;
-      case 'read':
-        r = await LDSS.read(col);
-        break;
-      case 'read_id':
-        r = await LDSS.readById(col, id);
-        break;
-      case 'count':
-        r = await LDSS.count(col);
-        break;
-      case 'list':
-        r = await LDSS.list();
-        break;
-      case 'delete':
-        r = await LDSS.delete(col, id);
-        break;
-      case 'clear':
-        r = await LDSS.clearCollection(col);
-        break;
-      case 'clear_all':
-        r = await LDSS.clearAll();
-        break;
-      case 'stats':
-        r = LDSS.getStats();
-        break;
-      default:
-        r = { ok: false, error: 'Unknown action' };
-    }
-    out(r);
-  } catch(e) {
-    out({ ok: false, error: e.message });
+  
+  WORKER.serverUrl = url;
+  localStorage.setItem('ldss_server_url', url);
+  WORKER.log('success', `✅ Serveur configuré: ${url}`);
+  
+  if (!WORKER.isPolling) {
+    WORKER.startPolling();
   }
 }
 
@@ -669,28 +320,24 @@ async function route() {
 
 (async () => {
   try {
-    console.log('🚀 LDSS v4.2 starting...');
-    await LDSS.init();
-    console.log('✅ LDSS initialized');
-    
+    await WORKER.init();
     document.getElementById('status').textContent = 'Online';
     document.getElementById('dot').style.background = '#22c55e';
-
-    // Lancer le test de persistance
-    await runPersistenceTest();
-
-    // Update uptime
-    setInterval(() => {
-      const uptime = Math.floor((Date.now() - LDSS.startTime) / 1000);
-      document.getElementById('s-uptime').textContent = uptime + 's';
-      document.getElementById('uptime').textContent = uptime + 's';
-    }, 1000);
-
-    await route();
+    
+    // Charger l'URL sauvegardée
+    if (WORKER.serverUrl) {
+      document.getElementById('serverUrl').value = WORKER.serverUrl;
+      WORKER.startPolling();
+    } else {
+      WORKER.log('info', 'ℹ️  Configurez l\'URL du serveur pour démarrer');
+    }
+    
+    WORKER.log('success', '✅ LDSS Worker v5 initialisé');
+    
   } catch(e) {
-    console.error('❌ Init error:', e);
-    document.getElementById('status').textContent = 'Error: ' + e.message;
+    document.getElementById('status').textContent = 'Error';
     document.getElementById('dot').style.background = '#ef4444';
+    WORKER.log('error', `❌ Erreur init: ${e.message}`);
   }
 })();
 </script>
