@@ -3,18 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LDSS v5 - Autonomous Worker</title>
+  <title>LDSS v6 - WebRTC Worker</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui;background:#0a0a12;color:#e0e0e0;padding:1rem;min-height:100vh}
     h1{font-size:1.3rem;background:linear-gradient(90deg,#00d4ff,#7b2cbf);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
     .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:1rem}
     .status{display:flex;align-items:center;gap:.5rem}
-    .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
+    .dot{width:10px;height:10px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444}
+    .dot.connected{background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
     .badge{background:#7b2cbf;color:#fff;padding:.3rem .7rem;border-radius:6px;font-size:.75rem;font-weight:bold}
-    .worker-status{background:rgba(34,197,94,.1);border:2px solid #22c55e;border-radius:8px;padding:1rem;margin-bottom:1rem}
-    .worker-status h3{margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem;color:#22c55e}
+    .connection-box{background:rgba(34,197,94,.1);border:2px solid #22c55e;border-radius:8px;padding:1rem;margin-bottom:1rem}
+    .connection-box.disconnected{background:rgba(239,68,68,.1);border-color:#ef4444}
+    .connection-box h3{margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
     .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin:1rem 0}
     .stat{background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.2);border-radius:6px;padding:.5rem;text-align:center}
     .stat-val{font-size:1.5rem;font-weight:bold;color:#00d4ff}
@@ -25,55 +27,61 @@
     .log-success{color:#22c55e}
     .log-error{color:#ef4444}
     .log-info{color:#00d4ff}
+    .log-warning{color:#eab308}
     .log-time{color:#666;margin-right:.5rem}
     .config-box{background:rgba(234,179,8,.1);border:1px solid #eab308;border-radius:8px;padding:1rem;margin-bottom:1rem}
     .config-box input{background:#1a1a2e;border:1px solid #3a3a4e;color:#e0e0e0;padding:.5rem;border-radius:4px;width:100%;margin-top:.5rem}
     .btn{background:linear-gradient(90deg,#7b2cbf,#00d4ff);border:none;padding:.5rem 1rem;border-radius:6px;color:#fff;font-weight:600;cursor:pointer;margin-top:.5rem}
+    .peer-info{background:rgba(0,0,0,.3);padding:.5rem;border-radius:4px;margin-top:.5rem;font-size:.8rem;font-family:monospace}
   </style>
 </head>
 <body>
   <div class="header">
     <div>
-      <h1>🤖 LDSS v5 - Autonomous Worker</h1>
-      <span class="badge">AUTO-POLLING</span>
+      <h1>🌐 LDSS v6 - WebRTC Worker</h1>
+      <span class="badge">REAL-TIME</span>
     </div>
     <div class="status">
       <div class="dot" id="dot"></div>
-      <span id="status">Starting...</span>
+      <span id="status">Disconnected</span>
     </div>
   </div>
 
   <div class="config-box">
-    <label style="color:#eab308;font-weight:600">🔧 Configuration Serveur</label>
-    <input type="text" id="serverUrl" placeholder="https://ton-serveur.onrender.com" value="">
-    <button class="btn" onclick="updateServerUrl()">💾 Mettre à jour</button>
+    <label style="color:#eab308;font-weight:600">🔧 Configuration Signaling Server</label>
+    <input type="text" id="signalingUrl" placeholder="https://ton-serveur.onrender.com" value="">
+    <button class="btn" onclick="connectToSignaling()">🔌 Connecter</button>
     <div style="font-size:.8rem;color:#888;margin-top:.5rem">
-      Le worker poll automatiquement ce serveur toutes les 5 secondes
+      WebRTC nécessite un serveur de signaling pour établir la connexion P2P
     </div>
   </div>
 
-  <div class="worker-status">
-    <h3>🔄 État du Worker</h3>
+  <div class="connection-box disconnected" id="connectionBox">
+    <h3>
+      <span id="connIcon">⚠️</span>
+      <span id="connTitle">En attente de connexion...</span>
+    </h3>
     <div class="stat-grid">
       <div class="stat">
-        <div class="stat-val" id="pollCount">0</div>
-        <div class="stat-label">Polls effectués</div>
+        <div class="stat-val" id="writeCount">0</div>
+        <div class="stat-label">Écritures</div>
       </div>
       <div class="stat">
-        <div class="stat-val" id="downloadCount">0</div>
-        <div class="stat-label">Téléchargements</div>
+        <div class="stat-val" id="readCount">0</div>
+        <div class="stat-label">Lectures</div>
       </div>
       <div class="stat">
         <div class="stat-val" id="storedCount">0</div>
         <div class="stat-label">Stockés</div>
       </div>
       <div class="stat">
-        <div class="stat-val" id="errorCount">0</div>
-        <div class="stat-label">Erreurs</div>
+        <div class="stat-val" id="bytesTransferred">0</div>
+        <div class="stat-label">KB transférés</div>
       </div>
     </div>
-    <div style="text-align:center;color:#888;font-size:.8rem">
-      Prochain poll dans <span id="nextPoll">5</span>s
+    <div class="peer-info" id="peerInfo">
+      Peer ID: <span id="peerId">-</span><br>
+      Latence: <span id="latency">-</span>ms
     </div>
   </div>
 
@@ -82,26 +90,35 @@
   </div>
   <div class="log-box" id="logs"></div>
 
+  <!-- Socket.IO Client -->
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <!-- SimplePeer -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/simple-peer/9.11.1/simplepeer.min.js"></script>
+
 <script>
 // ═══════════════════════════════════════════════════════════════
-// LDSS v5 - AUTONOMOUS WORKER
-// Poll automatiquement un serveur et stocke les données
+// LDSS v6 - WEBRTC WORKER
+// Communication temps réel bidirectionnelle avec le serveur
 // ═══════════════════════════════════════════════════════════════
 
-const WORKER = {
+const LDSS = {
   db: null,
-  serverUrl: localStorage.getItem('ldss_server_url') || '',
-  pollInterval: 5000, // 5 secondes
-  pollCount: 0,
-  downloadCount: 0,
-  storedCount: 0,
-  errorCount: 0,
-  isPolling: false,
+  socket: null,
+  peer: null,
+  signalingUrl: localStorage.getItem('ldss_signaling_url') || '',
+  isConnected: false,
+  
+  stats: {
+    writes: 0,
+    reads: 0,
+    stored: 0,
+    bytesTransferred: 0
+  },
   
   async init() {
-    // Ouvrir IndexedDB
+    // Initialiser IndexedDB
     return new Promise((res, rej) => {
-      const req = indexedDB.open('LDSS_v5', 1);
+      const req = indexedDB.open('LDSS_v6', 1);
       req.onerror = () => rej(req.error);
       req.onsuccess = () => { 
         this.db = req.result; 
@@ -111,8 +128,9 @@ const WORKER = {
         const db = e.target.result;
         if (!db.objectStoreNames.contains('storage')) {
           const store = db.createObjectStore('storage', { keyPath: 'id' });
-          store.createIndex('timestamp', 'timestamp', { unique: false });
           store.createIndex('dataId', 'dataId', { unique: false });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
+          store.createIndex('collection', 'collection', { unique: false });
         }
       };
     });
@@ -126,7 +144,6 @@ const WORKER = {
     entry.innerHTML = `<span class="log-time">${time}</span>${message}`;
     logEl.insertBefore(entry, logEl.firstChild);
     
-    // Garder seulement les 50 derniers logs
     while (logEl.children.length > 50) {
       logEl.removeChild(logEl.lastChild);
     }
@@ -134,216 +151,293 @@ const WORKER = {
     console.log(`[${type.toUpperCase()}] ${message}`);
   },
   
-  async poll() {
-    if (!this.serverUrl) {
-      this.log('info', '⏸️  Pas de serveur configuré, en attente...');
-      return;
-    }
+  updateUI() {
+    document.getElementById('writeCount').textContent = this.stats.writes;
+    document.getElementById('readCount').textContent = this.stats.reads;
+    document.getElementById('storedCount').textContent = this.stats.stored;
+    document.getElementById('bytesTransferred').textContent = Math.round(this.stats.bytesTransferred / 1024);
+  },
+  
+  connectToSignaling(url) {
+    this.signalingUrl = url;
+    localStorage.setItem('ldss_signaling_url', url);
     
-    this.pollCount++;
-    document.getElementById('pollCount').textContent = this.pollCount;
+    this.log('info', `🔌 Connexion au serveur de signaling: ${url}`);
     
-    try {
-      this.log('info', `🔍 Poll ${this.pollCount}: ${this.serverUrl}/api/pending`);
+    this.socket = io(url, {
+      transports: ['websocket', 'polling']
+    });
+    
+    this.socket.on('connect', () => {
+      this.log('success', '✅ Socket.IO connecté');
+      document.getElementById('peerId').textContent = this.socket.id;
       
-      const response = await fetch(`${this.serverUrl}/api/pending`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-      });
+      // S'annoncer comme worker
+      this.socket.emit('worker-ready', { id: this.socket.id });
+    });
+    
+    this.socket.on('disconnect', () => {
+      this.log('error', '❌ Socket.IO déconnecté');
+      this.isConnected = false;
+      this.updateConnectionUI(false);
+    });
+    
+    // Recevoir signal du serveur pour établir WebRTC
+    this.socket.on('server-signal', (signal) => {
+      this.log('info', '📡 Signal WebRTC reçu du serveur');
+      this.initPeer(signal);
+    });
+    
+    this.socket.on('error', (err) => {
+      this.log('error', `❌ Erreur Socket.IO: ${err}`);
+    });
+  },
+  
+  initPeer(incomingSignal) {
+    this.log('info', '🚀 Initialisation connexion WebRTC...');
+    
+    // Créer peer (pas initiator car c'est le serveur qui initie)
+    this.peer = new SimplePeer({
+      initiator: false,
+      trickle: false
+    });
+    
+    // Quand notre signal est prêt, l'envoyer au serveur
+    this.peer.on('signal', (signal) => {
+      this.log('info', '📤 Envoi signal WebRTC au serveur');
+      this.socket.emit('worker-signal', signal);
+    });
+    
+    // Connexion établie !
+    this.peer.on('connect', () => {
+      this.log('success', '🎉 CONNEXION WEBRTC ÉTABLIE !');
+      this.isConnected = true;
+      this.updateConnectionUI(true);
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const pending = await response.json();
-      
-      if (pending.ids && pending.ids.length > 0) {
-        this.log('success', `📦 ${pending.ids.length} données en attente`);
+      // Ping pour mesurer latence
+      this.startLatencyCheck();
+    });
+    
+    // Recevoir données
+    this.peer.on('data', async (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        this.stats.bytesTransferred += data.length;
+        this.updateUI();
         
-        for (const id of pending.ids) {
-          await this.downloadAndStore(id);
-        }
-      } else {
-        this.log('info', '✓ Aucune donnée en attente');
+        await this.handleMessage(message);
+      } catch(e) {
+        this.log('error', `❌ Erreur traitement message: ${e.message}`);
       }
-      
-    } catch(e) {
-      this.errorCount++;
-      document.getElementById('errorCount').textContent = this.errorCount;
-      this.log('error', `❌ Erreur poll: ${e.message}`);
-    }
+    });
+    
+    this.peer.on('error', (err) => {
+      this.log('error', `❌ Erreur WebRTC: ${err.message}`);
+    });
+    
+    this.peer.on('close', () => {
+      this.log('warning', '⚠️ Connexion WebRTC fermée');
+      this.isConnected = false;
+      this.updateConnectionUI(false);
+    });
+    
+    // Accepter le signal entrant
+    this.peer.signal(incomingSignal);
   },
   
-  async downloadAndStore(id) {
+  async handleMessage(message) {
+    const { action, requestId, collection, dataId, data } = message;
+    
+    this.log('info', `📨 Reçu: ${action} (request: ${requestId})`);
+    
     try {
-      this.log('info', `📥 Téléchargement: ${id}`);
+      let response = { requestId, success: true };
       
-      const response = await fetch(`${this.serverUrl}/api/queue/${id}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      switch(action) {
+        case 'write':
+          const writeResult = await this.write(collection, dataId, data);
+          this.stats.writes++;
+          response.id = writeResult.id;
+          this.log('success', `✅ Write: ${collection}/${dataId} (${JSON.stringify(data).length} bytes)`);
+          break;
+          
+        case 'read':
+          const readResult = await this.read(collection, dataId);
+          this.stats.reads++;
+          response.data = readResult;
+          this.log('success', `✅ Read: ${collection}/${dataId} (${readResult ? JSON.stringify(readResult).length : 0} bytes)`);
+          break;
+          
+        case 'list':
+          const listResult = await this.list(collection);
+          response.items = listResult;
+          this.log('success', `✅ List: ${collection} (${listResult.length} items)`);
+          break;
+          
+        case 'delete':
+          await this.delete(collection, dataId);
+          this.log('success', `✅ Delete: ${collection}/${dataId}`);
+          break;
+          
+        case 'ping':
+          response.pong = true;
+          response.timestamp = Date.now();
+          break;
+          
+        default:
+          response.success = false;
+          response.error = 'Unknown action';
       }
       
-      const payload = await response.json();
-      
-      this.downloadCount++;
-      document.getElementById('downloadCount').textContent = this.downloadCount;
-      
-      // Stocker dans IndexedDB
-      await this.store(id, payload);
-      
-      // Confirmer au serveur
-      await fetch(`${this.serverUrl}/api/confirm/${id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      this.log('success', `✅ Stocké: ${id} (${JSON.stringify(payload).length} bytes)`);
+      this.updateUI();
+      this.send(response);
       
     } catch(e) {
-      this.errorCount++;
-      document.getElementById('errorCount').textContent = this.errorCount;
-      this.log('error', `❌ Erreur download ${id}: ${e.message}`);
+      this.log('error', `❌ Erreur ${action}: ${e.message}`);
+      this.send({ 
+        requestId, 
+        success: false, 
+        error: e.message 
+      });
     }
   },
   
-  async store(dataId, data) {
+  async write(collection, dataId, data) {
     return new Promise((res, rej) => {
       const tx = this.db.transaction(['storage'], 'readwrite');
       const store = tx.objectStore('storage');
       
-      // ✅ Utiliser dataId comme ID principal pour faciliter la récupération
       const record = {
-        id: dataId, // ✅ UTILISER LE MÊME ID
-        dataId: dataId,
-        data: data,
+        id: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        collection,
+        dataId,
+        data,
         timestamp: Date.now(),
         size: JSON.stringify(data).length
       };
       
-      // Supprimer l'ancien si existe
-      const deleteReq = store.delete(dataId);
-      deleteReq.onsuccess = () => {
-        const req = store.add(record);
-        req.onsuccess = () => {
-          this.storedCount++;
-          document.getElementById('storedCount').textContent = this.storedCount;
-          res(req.result);
-        };
-        req.onerror = () => rej(req.error);
+      const req = store.add(record);
+      req.onsuccess = () => {
+        this.stats.stored++;
+        res({ id: record.id });
       };
-      deleteReq.onerror = () => {
-        // Pas grave si n'existe pas, on ajoute quand même
-        const req = store.add(record);
-        req.onsuccess = () => {
-          this.storedCount++;
-          document.getElementById('storedCount').textContent = this.storedCount;
-          res(req.result);
-        };
-        req.onerror = () => rej(req.error);
-      };
+      req.onerror = () => rej(req.error);
     });
   },
   
-  async read(dataId) {
+  async read(collection, dataId) {
     return new Promise((res, rej) => {
       const tx = this.db.transaction(['storage'], 'readonly');
       const store = tx.objectStore('storage');
-      
-      // ✅ Lire directement par ID
-      const req = store.get(dataId);
+      const idx = store.index('dataId');
+      const req = idx.getAll(dataId);
       
       req.onsuccess = () => {
-        if (req.result) {
-          res({
-            ok: true,
-            dataId: dataId,
-            count: 1,
-            data: [req.result]
-          });
-        } else {
-          // Fallback: chercher par index
-          const idx = store.index('dataId');
-          const idxReq = idx.getAll(dataId);
-          
-          idxReq.onsuccess = () => {
-            res({
-              ok: true,
-              dataId: dataId,
-              count: idxReq.result.length,
-              data: idxReq.result
-            });
-          };
-          idxReq.onerror = () => rej(idxReq.error);
-        }
+        const results = req.result.filter(r => r.collection === collection);
+        res(results.length > 0 ? results[0].data : null);
       };
       req.onerror = () => rej(req.error);
     });
   },
   
-  async readAll() {
+  async list(collection) {
     return new Promise((res, rej) => {
       const tx = this.db.transaction(['storage'], 'readonly');
-      const req = tx.objectStore('storage').getAll();
+      const store = tx.objectStore('storage');
+      const idx = store.index('collection');
+      const req = idx.getAll(collection);
       
       req.onsuccess = () => {
-        res({
-          ok: true,
-          count: req.result.length,
-          data: req.result
-        });
+        res(req.result.map(r => ({ dataId: r.dataId, timestamp: r.timestamp })));
       };
       req.onerror = () => rej(req.error);
     });
   },
   
-  startPolling() {
-    if (this.isPolling) return;
-    this.isPolling = true;
-    
-    const pollLoop = async () => {
-      await this.poll();
+  async delete(collection, dataId) {
+    return new Promise((res, rej) => {
+      const tx = this.db.transaction(['storage'], 'readwrite');
+      const store = tx.objectStore('storage');
+      const idx = store.index('dataId');
+      const req = idx.getAll(dataId);
       
-      // Countdown
-      let remaining = this.pollInterval / 1000;
-      const countdown = setInterval(() => {
-        remaining--;
-        document.getElementById('nextPoll').textContent = remaining;
-        if (remaining <= 0) clearInterval(countdown);
-      }, 1000);
-      
-      setTimeout(pollLoop, this.pollInterval);
-    };
+      req.onsuccess = () => {
+        const items = req.result.filter(r => r.collection === collection);
+        const deleteTx = this.db.transaction(['storage'], 'readwrite');
+        const deleteStore = deleteTx.objectStore('storage');
+        
+        items.forEach(item => deleteStore.delete(item.id));
+        
+        deleteTx.oncomplete = () => res();
+        deleteTx.onerror = () => rej(deleteTx.error);
+      };
+      req.onerror = () => rej(req.error);
+    });
+  },
+  
+  send(data) {
+    if (this.peer && this.isConnected) {
+      this.peer.send(JSON.stringify(data));
+    }
+  },
+  
+  startLatencyCheck() {
+    setInterval(() => {
+      if (this.isConnected) {
+        const start = Date.now();
+        this.send({ action: 'ping', timestamp: start });
+        
+        // On recevra le pong dans handleMessage
+        const checkPong = (e) => {
+          const msg = JSON.parse(e.data.toString());
+          if (msg.pong) {
+            const latency = Date.now() - start;
+            document.getElementById('latency').textContent = latency;
+            this.peer.removeListener('data', checkPong);
+          }
+        };
+      }
+    }, 5000);
+  },
+  
+  updateConnectionUI(connected) {
+    const box = document.getElementById('connectionBox');
+    const icon = document.getElementById('connIcon');
+    const title = document.getElementById('connTitle');
+    const dot = document.getElementById('dot');
+    const status = document.getElementById('status');
     
-    pollLoop();
-    this.log('success', '🚀 Worker démarré, polling toutes les 5s');
+    if (connected) {
+      box.classList.remove('disconnected');
+      icon.textContent = '🟢';
+      title.textContent = 'Connexion WebRTC active';
+      dot.classList.add('connected');
+      status.textContent = 'Connected';
+    } else {
+      box.classList.add('disconnected');
+      icon.textContent = '⚠️';
+      title.textContent = 'En attente de connexion...';
+      dot.classList.remove('connected');
+      status.textContent = 'Disconnected';
+    }
   }
 };
 
-// Exposer globalement pour Puppeteer
-window.LDSS_WORKER = WORKER;
+// Exposer globalement
+window.LDSS = LDSS;
 
 // ═══════════════════════════════════════════════════════════════
 // UI FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
-function updateServerUrl() {
-  const url = document.getElementById('serverUrl').value.trim();
+function connectToSignaling() {
+  const url = document.getElementById('signalingUrl').value.trim();
   if (!url) {
     alert('❌ URL vide');
     return;
   }
   
-  WORKER.serverUrl = url;
-  localStorage.setItem('ldss_server_url', url);
-  WORKER.log('success', `✅ Serveur configuré: ${url}`);
-  
-  if (!WORKER.isPolling) {
-    WORKER.startPolling();
-  }
+  LDSS.connectToSignaling(url);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -352,24 +446,19 @@ function updateServerUrl() {
 
 (async () => {
   try {
-    await WORKER.init();
-    document.getElementById('status').textContent = 'Online';
-    document.getElementById('dot').style.background = '#22c55e';
+    await LDSS.init();
+    LDSS.log('success', '✅ LDSS Worker v6 initialisé (IndexedDB)');
     
     // Charger l'URL sauvegardée
-    if (WORKER.serverUrl) {
-      document.getElementById('serverUrl').value = WORKER.serverUrl;
-      WORKER.startPolling();
+    if (LDSS.signalingUrl) {
+      document.getElementById('signalingUrl').value = LDSS.signalingUrl;
+      LDSS.log('info', 'ℹ️  Cliquez sur "Connecter" pour établir la connexion WebRTC');
     } else {
-      WORKER.log('info', 'ℹ️  Configurez l\'URL du serveur pour démarrer');
+      LDSS.log('info', 'ℹ️  Configurez l\'URL du serveur de signaling');
     }
     
-    WORKER.log('success', '✅ LDSS Worker v5 initialisé');
-    
   } catch(e) {
-    document.getElementById('status').textContent = 'Error';
-    document.getElementById('dot').style.background = '#ef4444';
-    WORKER.log('error', `❌ Erreur init: ${e.message}`);
+    LDSS.log('error', `❌ Erreur init: ${e.message}`);
   }
 })();
 </script>
